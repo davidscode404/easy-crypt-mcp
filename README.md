@@ -33,7 +33,7 @@ binary.
 | [`demo/replay/`](demo/replay) | Side-by-side replay of an agent with the MCP tools vs. without them. |
 | [`examples/`](examples) | Two tiny smoke-test proofs, one closed and one with an open goal. |
 | [`tests/`](tests) | `test_smoke.py` uses a fake binary and runs anywhere. `test_real.py` needs real EasyCrypt. |
-| [`server.py`](server.py), [`scripts/ec-docker`](scripts/ec-docker) | The first single-file version of the server, kept for reference. Use `mcp_server.py` instead. |
+| [`scripts/ec-docker`](scripts/ec-docker) | Runs `easycrypt` inside the image with the current directory mounted, for `EASYCRYPT_BIN=scripts/ec-docker` (the live demo without a native install). |
 
 ---
 

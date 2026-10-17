@@ -39,7 +39,7 @@ DIAG_RE = re.compile(
     r"^\[(?P<severity>[A-Za-z]+)\]\s*\[(?P<file>.+?)"
     r"(?:: line (?P<line>\d+) \((?P<col>\d+)(?:-(?P<end_col>\d+))?\)"
     r"(?: to line (?P<end_line>\d+) \((?P<end_col2>\d+)\))?"
-    r"|:(?P<line2>\d+)(?::(?P<col2>\d+))?)"
+    r"|:(?P<line2>-?\d+)(?::(?P<col2>\d+))?)"
     r"\]\s*(?P<message>.*)$"
 )
 
@@ -175,7 +175,10 @@ def _patch(f: Path, snippet: str, line: int | None) -> tuple[str, int, int]:
         raise ECError(f"line {line} out of range (file has {len(lines)} lines)")
     if lines and not lines[-1].endswith("\n"):
         lines[-1] += "\n"
-    snip = snippet if snippet.endswith("\n") else snippet + "\n"
+    # Indent like the line we insert before (or the one above at EOF), so the file stays tidy.
+    ref = lines[at - 1] if at <= len(lines) else (lines[-1] if lines else "")
+    indent = ref[: len(ref) - len(ref.lstrip())] if ref.strip() else ""
+    snip = "".join(indent + ln.strip() + "\n" for ln in snippet.strip().splitlines()) or "\n"
     patched = lines[: at - 1] + [snip] + lines[at - 1 :]
     return "".join(patched), at, at - 1 + len(snip.splitlines())
 
@@ -208,7 +211,8 @@ def try_snippet(path: str, snippet: str, line: int | None = None) -> Result:
     text, at, end_line = _patch(f, snippet, line)
     res = _check_patch(f, text, end_line)
     res.note = (f"Snippet occupied lines {at}-{end_line} of a temp copy; "
-                f"diagnostic line numbers refer to that copy. Original file unchanged.")
+                f"diagnostic line numbers refer to that copy. Original file unchanged."
+                + (" Every line after the snippet still checks." if res.ok else ""))
     return res
 
 
@@ -270,7 +274,14 @@ def theories_root() -> Path:
                 break
         else:
             raise ECError("cannot locate EasyCrypt's theories; set EASYCRYPT_THEORIES")
-    return Path(THEORIES_ROOT)
+    root = Path(THEORIES_ROOT)
+    if not root.is_dir():
+        raise ECError(
+            f"EasyCrypt's theories are at {root} inside its own environment, which is not visible "
+            "from here (e.g. EasyCrypt runs in Docker through a wrapper). Copy them out once — "
+            "`docker cp <container>:" + str(root) + " ./theories` — and set EASYCRYPT_THEORIES to that copy; "
+            "or run the whole MCP server inside the image (bin/easycrypt-mcp), where they are local.")
+    return root
 
 
 def search_lib(pattern: str, limit: int = 40) -> dict:

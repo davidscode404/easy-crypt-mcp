@@ -12,7 +12,7 @@ at the same absolute path. Prints the tool's JSON result. Env: EASYCRYPT_IMAGE, 
 """
 import json, os, subprocess, sys
 root = os.getcwd()
-img = os.environ.get("EASYCRYPT_IMAGE", "ghcr.io/davidscode404/easy-crypt-mcp:anna")
+img = os.environ.get("EASYCRYPT_IMAGE", "ghcr.io/davidscode404/easy-crypt-mcp:main")
 cmd = ["docker", "run", "-i", "--rm", "-v", f"{root}:{root}", "-w", root,
        "-e", f"EASYCRYPT_ROOT={root}", "-e", "EASYCRYPT_ARGS=" + os.environ.get("EASYCRYPT_ARGS", "-timeout 10")]
 if os.environ.get("EASYCRYPT_APP"):

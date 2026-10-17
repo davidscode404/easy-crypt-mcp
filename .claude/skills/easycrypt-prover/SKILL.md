@@ -40,6 +40,27 @@ small file), and git history of the file is the record of what you did.
 5. Ladder exhausted → split the goal (`seq`, `conseq`, `case`) and recurse on the pieces.
    Still stuck → HANDOFF.
 
+## Repairing an existing proof (a line is missing or wrong)
+
+The tools only **insert**; they cannot edit or delete a line. So when an *existing* tactic fails,
+the failing line is usually right and something is missing **before** it. Insert at the failing
+line (that is what `line` means: before it) whatever makes that existing line succeed. After an
+insertion, every later line number shifts down — take the new failing line from the next
+`check_file`, never from memory.
+
+Structural errors and their usual cause:
+
+| Error at an existing line | Usually means | Insert before it |
+|---|---|---|
+| `invalid last instruction` at a `call` | the two programs are not lined up: a sampling or assignment sits between the `call`s on one side | `swap{1} i k.` / `swap{2} i k.` — read the numbered side-by-side listing in `goals` |
+| `rnd` / `auto` fails on two different distributions | the samplings facing each other do not match | `swap` so matching samplings face each other, or `rnd` with a bijection |
+| `cannot save an incomplete proof` at `qed.` | the last step did not close the goal | a closing step, written `by …` |
+
+`swap{1} i k.` moves instruction *i* of program 1 by *k* positions (negative = earlier); instructions
+are numbered in the listing `goals` prints. A structural step like `swap` has nothing to close, so
+rule 3 (`by …`) does not apply to it — it is verified by the next existing line now passing, which
+`try_snippet` checks for you because it re-runs the whole file.
+
 ## Tactic ladder
 
 ### Ambient goals
@@ -84,6 +105,9 @@ small file), and git history of the file is the record of what you did.
 - `diagnostics[0].message`: the error at the first failing command; continuation lines are
   included. `raw_stderr` is set only when nothing could be parsed.
 - `note` on `try_snippet`/`apply_snippet` tells you which lines the snippet occupied.
+- `goals` after a successful `try_snippet`/`apply_snippet` is the state *after* the snippet; on a
+  failed `check_file` it is the state *before* the failing line. `ok: true` with no diagnostics
+  from `try_snippet` also means every line after the insertion still passes.
 
 ## HANDOFF
 

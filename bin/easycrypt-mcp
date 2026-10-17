@@ -4,7 +4,7 @@
 # Used by .mcp.json (Claude Code picks it up when you open this repo); also fine by hand:
 #   claude mcp add easycrypt -- sh bin/easycrypt-mcp
 set -eu
-IMAGE="${EASYCRYPT_IMAGE:-ghcr.io/davidscode404/easy-crypt-mcp:anna}"
+IMAGE="${EASYCRYPT_IMAGE:-ghcr.io/davidscode404/easy-crypt-mcp:main}"
 exec docker run -i --rm --platform linux/amd64 \
   -v "$PWD:$PWD" -w "$PWD" \
   -e EASYCRYPT_ROOT="$PWD" \

@@ -4,4 +4,4 @@
 # Usage: EASYCRYPT_BIN=/abs/path/scripts/ec-docker python server.py
 # No -t: a TTY would merge stderr into stdout and break diagnostic parsing.
 exec docker run --rm -i -v "$PWD":"$PWD" -w "$PWD" \
-  "${EASYCRYPT_IMAGE:-easycrypt}" easycrypt "$@"
+  "${EASYCRYPT_IMAGE:-ghcr.io/davidscode404/easy-crypt-mcp:main}" easycrypt "$@"
