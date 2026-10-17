@@ -29,7 +29,9 @@ def _use_real_binary(monkeypatch):
     monkeypatch.setattr(ec, "EC_BIN", BIN)
 
 GOOD = "lemma t : true.\nproof.\ntrivial.\nqed.\n"
-BAD = "lemma t : false.\nproof.\ntrivial.\nqed.\n"
+# `by trivial.` not `trivial.`: bare `trivial` never fails, it just leaves the goal open and
+# the error surfaces at `qed.` ("cannot save an incomplete proof") one line later. [run]-verified.
+BAD = "lemma t : false.\nproof.\nby trivial.\nqed.\n"
 
 
 def make(tmp_path, body, name="T.ec"):
@@ -53,7 +55,7 @@ def test_check_file_good_and_bad(tmp_path):
     assert r.diagnostics, f"nothing parsed from stderr: {r.raw_stderr!r}"
     d = r.diagnostics[0]
     assert d.severity == "critical", d
-    assert d.line == 3, d  # the failing `trivial.`
+    assert d.line == 3, d  # the failing `by trivial.`
     assert d.file.endswith("T.ec"), d
     # -lastgoals printed the remaining goal to stdout
     assert "false" in r.goals, r.goals
