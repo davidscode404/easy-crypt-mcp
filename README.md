@@ -1,115 +1,198 @@
-# EasyCrypt × Agents — Project Notes
+# easycrypt-mcp
 
-*Reinvent the Wheel Hack, Oct 17 2026. Research & verification done against primary sources (EasyCrypt source code, official READMEs); items marked ⚠️ are not yet tested against a built binary.*
+Lets an AI agent (e.g. Claude) drive [EasyCrypt](https://github.com/EasyCrypt/easycrypt), the
+proof assistant for cryptographic security proofs.
 
-## 1. What we're building
+EasyCrypt is normally used through an Emacs front-end, built for a human at a keyboard. This
+project gives it a programmatic endpoint: an [MCP](https://modelcontextprotocol.io) server that
+lets an agent check a proof file, read the open goals at any line, and test a tactic before
+committing to it. Everything runs in one Docker image, so you don't install EasyCrypt or its
+SMT solvers yourself.
 
-EasyCrypt is the standard tool for machine-checked cryptographic proofs (game-hopping style). Its only interface is the Emacs front-end (Proof General) — designed for a human's hands and eyes. An agent has **no endpoint to control it**: can't load a proof, step a tactic, or read the current goal programmatically.
+---
 
-We add that endpoint: an **MCP server** wrapping EasyCrypt's CLI, so any MCP-capable agent (Claude in our demo) can drive proofs end-to-end. A skill/prompt layer on top encodes proof strategy (which tactics to try, when to fire SMT solvers, how to recover from a failed step).
+## Quick start (Docker)
 
-Why this fits the judging brief: the brief's list of bad-scientific-software traits names "no endpoints for agentic control" — our deliverable is literally that endpoint. Install pain (see §3) is itself evidence of the "needs reinventing" claim.
+You need [Docker](https://docs.docker.com/get-docker/) and, to talk to it from Claude,
+[Claude Code](https://docs.claude.com/en/docs/claude-code). Run everything from this repo's folder.
 
-## 2. What EasyCrypt's CLI already gives us (verified in source, main branch 2026-10-17)
-
-From `src/ecOptions.ml{,i}`, `src/ec.ml`, `src/ecTerminal.ml`:
-
-```
-easycrypt compile <file.ec>   # batch-check whole file; -trace saves goals/messages to .eco
-easycrypt llm <file.ec>       # "LLM-friendly batch compilation" (upstream's own!)
-    -lastgoals                #   on failure, pretty-print remaining goals to stdout
-    -upto LINE[:COL]          #   check up to position, print goals there, exit 0
-easycrypt cli [-emacs]        # interactive toplevel on stdin/stdout (what Proof General drives)
-easycrypt config              # print detected provers/why3 config
-easycrypt why3config          # (re)detect SMT solvers
-```
-
-- Output contract (`llm` mode): diagnostics → **stderr** as `[Severity] [file:LINE] message`; goals → **stdout**; exit 0 = accepted / upto reached, 1 = failure.
-- Prover selection: repeated `-p <name>` flags.
-- Interactive mode supports positional undo (`ecCommands.mli: val undo : int -> unit`).
-- The existence of upstream's `llm` subcommand = maintainers already want this direction; we build the agent layer on top of their entry point.
-
-## 3. Install (Ubuntu/Debian; macOS: `brew install opam gmp mpfr`)
-
-Official method is opam (no official Docker image, no prebuilt binaries). Steps ✅ were run successfully in a container; ⚠️ steps are correct per README but our container's egress policy blocked the source downloads, so finish them on a normal network (hotel Wi-Fi, not necessarily venue Wi-Fi).
+**1. Check you can reach EasyCrypt's base image** (it holds OCaml, all dependencies and the solvers):
 
 ```bash
-# ✅ system deps
-sudo apt-get update && sudo apt-get install -y opam libgmp-dev libmpfr-dev
-
-# ✅ init opam (if opam.ocaml.org is blocked, use the GitHub mirror form below)
-opam init -y
-# fallback: opam init -y --bare git+https://github.com/ocaml/opam-repository.git
-
-# ✅ switch using the system OCaml — skips a ~30 min compiler build
-opam switch create ec ocaml-system -y
-eval $(opam env --switch=ec)
-
-# ✅ pin sources
-opam pin -yn add easycrypt https://github.com/EasyCrypt/easycrypt.git
-
-# ⚠️ deps (43 pkgs, 20–40 min). OPAMDEPEXTYES=1 avoids an interactive prompt.
-OPAMDEPEXTYES=1 opam install -y --deps-only easycrypt
-
-# ⚠️ pinned solver + easycrypt itself
-opam install -y alt-ergo.2.6.0
-opam install -y easycrypt
-easycrypt why3config
-easycrypt --version
+docker pull --platform linux/amd64 ghcr.io/easycrypt/ec-build-box:main
 ```
 
-Version constraints (official README): Alt-Ergo **2.6.0**, Z3 **4.12.x**, CVC5 **1.0.8** (optional but more solvers = more proofs close), Why3 **≥1.8 <1.9** (opam resolves 1.8.2 automatically).
+If this fails, see [Troubleshooting](#troubleshooting) before going further.
 
-Gotchas we actually hit: opam.ocaml.org unreachable → GitHub mirror works; full compiler build unnecessary → `ocaml-system`; depext interactive prompt ignores `-y` → preinstall gmp/mpfr + env var; why3/uutf/topkg sources live on `why3.gitlabpages.inria.fr` / `erratique.ch` (not GitHub) → restrictive networks break there. **Only one machine needs a working install** — everyone else goes through the MCP server.
+**2. Get the image.** CI builds and publishes it on every push, so normally just pull:
 
-## 4. Architecture decision: stateless, file-as-state ("Route A")
+```bash
+docker pull ghcr.io/davidscode404/easy-crypt-mcp:main
+docker tag  ghcr.io/davidscode404/easy-crypt-mcp:main easycrypt-mcp
+```
 
-A proof session is inherently stateful (accepted steps + open goals). The design question is who holds the state.
+Or build it yourself (about 5–10 minutes; it compiles EasyCrypt and tests it):
 
-- **Route A (chosen):** the `.ec` file IS the state. Every tool call shells out to `easycrypt llm`, which replays the file (cheap: `.eco` caches verified prefixes). MCP server holds nothing → free crash recovery, free parallelism, and the file's git history is the full agent trace.
-- **Route B (upgrade path):** keep `easycrypt cli` alive as a child process; tools become incremental `step/get_goals/rollback`. Finer-grained + faster per step, but the server becomes a session manager. If we do it, expose state as **immutable snapshot IDs** (map rollback → EasyCrypt's positional `undo`), not PG-style undo counting.
+```bash
+docker build --platform linux/amd64 -t easycrypt-mcp .
+```
 
-Prior art (all primary sources): the Lean community's **[repl](https://github.com/leanprover-community/repl)** — the standard verification backend in LLM-prover work — is a stateful JSON process whose state is addressed by immutable `env` snapshot IDs (backtrack = reuse an old ID), *and* it ships a batch file mode; **[PyPantograph](https://github.com/stanford-centaur/PyPantograph)** (Stanford) likewise offers both per-tactic interaction and whole-file checking; **[LeanDojo](https://github.com/lean-dojo/LeanDojo)** (NeurIPS 2023) wrapped interaction in gym-style sessions and its v1 is deprecated — interaction layers rot; file-level ground truth survives. Same tool schema works for A and B, so we can swap the backend without touching the agent side.
+The build ends by checking EasyCrypt on a proof that should pass and one that should fail.
+If it finishes, EasyCrypt works.
 
-Tool design follows Anthropic's [Writing effective tools for agents](https://www.anthropic.com/engineering/writing-tools-for-agents): few consolidated tools, high-signal returns (pretty goals, not dumps), actionable error messages.
+**3. Check the solvers were detected:**
 
-## 5. The MCP server (server.py, ~150 lines, Python + `mcp` SDK)
+```bash
+docker run --rm --platform linux/amd64 easycrypt-mcp easycrypt config
+```
 
-| tool | wraps | returns |
+You should see Alt-Ergo, Z3 and CVC5 listed.
+
+**4. Connect it to Claude Code.** If your proofs live in this repo (like the demo), just open the
+repo in Claude Code: [`.mcp.json`](.mcp.json) registers the server via [`bin/easycrypt-mcp`](bin/easycrypt-mcp)
+— approve it when asked. For proofs elsewhere, `cd` into their folder, then:
+
+```bash
+claude mcp add easycrypt -- docker run -i --rm --platform linux/amd64 \
+  -v "$PWD:$PWD" -w "$PWD" -e EASYCRYPT_ROOT="$PWD" -e EASYCRYPT_ARGS="-timeout 10" easycrypt-mcp
+```
+
+**5. Try it.** Start `claude` in that folder and ask, for example:
+
+> Check `MyProof.ec` with the easycrypt tools, then show me the goals at line 40.
+
+> On Apple Silicon Macs the image runs under emulation (the solvers are Intel-only builds).
+> It works, but SMT calls are slower; see [Configuration](#configuration) to raise the timeout.
+
+---
+
+## What the agent can do
+
+| Tool | What it does |
+|---|---|
+| `easycrypt_config` | Checks the install and lists the SMT solvers EasyCrypt found. |
+| `check_file(path)` | Checks a whole `.ec` file. Returns whether it passed, any errors with line numbers, and the unproved goals if it failed. |
+| `goals_at(path, line, col?)` | Shows the proof state (what's left to prove) at a given line. |
+| `try_snippet(path, snippet, line?)` | Tests a tactic on a temporary copy of the file and returns the resulting goals. **Never changes your file.** |
+| `apply_snippet(path, snippet, line?)` | Same check; if it passes, writes the tactic into the file and makes one git commit (`agent: …`). The only way the agent changes a file. |
+| `search_lib(pattern)` | Greps EasyCrypt's standard library for lemma/operator declarations. (EasyCrypt's own `search` prints nothing in batch mode; names created by `clone … rename` only show up via `print`.) |
+
+A typical loop: look at the goals with `goals_at`, test a tactic with `try_snippet`, and if it
+works, `apply_snippet` it (one commit per accepted step), then confirm with `check_file`. The
+strategy — which tactics to try, when to call SMT, when to stop and report — is a Claude Code skill
+in [`.claude/skills/easycrypt-prover/SKILL.md`](.claude/skills/easycrypt-prover/SKILL.md); it loads
+automatically when you start `claude` in this repo. Design and verified facts: [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Demo
+
+[`proofs/elgamal.ec`](proofs/elgamal.ec) is EasyCrypt's own ElGamal IND-CPA ⇔ DDH example with the
+proof of the first game hop (`cpa_ddh0`, line 74) removed. From this repo's root, with the server
+added as in step 4:
+
+> Complete the proof of `cpa_ddh0` in `proofs/elgamal.ec` with the easycrypt tools.
+
+Watch `git log --oneline -- proofs/elgamal.ec` fill up, one commit per accepted tactic. The original
+is `examples/elgamal.ec` in the EasyCrypt repository.
+
+## How it works
+
+The server keeps no state. The `.ec` file *is* the proof state: every tool call runs EasyCrypt's
+batch checker (`easycrypt llm`) on the file and returns the result. So the server can be
+restarted at any time, several calls can run in parallel, and the file's git history is a full
+record of what the agent did.
+
+Your folder is mounted into the container **at the same path** (`-v "$PWD:$PWD"`). That's why
+step 4 must be run from the folder with your proofs: a path like `/Users/you/proofs/A.ec` then
+means the same file on your machine and inside the container.
+
+## Configuration
+
+Set these with `-e NAME=value` in the `docker run` part of step 4.
+
+| Variable | Default | Purpose |
 |---|---|---|
-| `easycrypt_config()` | `easycrypt config` | install health, detected solvers |
-| `check_file(path)` | `llm -lastgoals` | `ok`, diagnostics `[{severity,file,line,message}]`, pretty `goals` |
-| `goals_at(path, line[, col])` | `llm -upto` | proof state at a position |
-| `try_snippet(path, snippet[, line])` | temp-copy + insert + check | does this tactic work — **never mutates the real file** |
+| `EASYCRYPT_ARGS` | *(empty)* | Extra flags for every check, e.g. `-timeout 20` (SMT timeout, seconds) or `-p Z3` (choose a solver; repeatable). |
+| `EASYCRYPT_ROOT` | *(none)* | Only files inside this folder may be checked. Step 4 sets it to your folder. |
+| `EASYCRYPT_WALL` | `120` | Hard time limit per call, in seconds; stops a stuck solver from hanging the agent. |
+| `EASYCRYPT_BIN` | `easycrypt` | Path to the EasyCrypt binary (only needed outside Docker). |
 
-Agent loop: `goals_at` → `try_snippet` a tactic → if ok, apply the edit with the editor tool → `check_file` → repeat.
+To pin a specific EasyCrypt version for a reproducible demo, build with
+`--build-arg EC_REF=<commit-or-tag>`.
 
-Setup:
+## Browser / REST access (optional)
+
+For poking at the tools by hand, the same functions are available over HTTP:
+
 ```bash
-pip install mcp
-claude mcp add easycrypt -e EASYCRYPT_BIN=easycrypt -- python /abs/path/server.py
+docker run --rm --platform linux/amd64 -p 8000:8000 -v "$PWD:$PWD" -w "$PWD" easycrypt-mcp \
+  python3 -m uvicorn --app-dir /app http_api:app --host 0.0.0.0 --port 8000
 ```
 
-⚠️ The output parser was written against EasyCrypt's printer source but has **not run against a built binary**. First thing after install:
+Open <http://localhost:8000/docs> for an interactive page where you can try each call.
+
+Or call one tool from the shell through the real MCP server (one container per call):
+
 ```bash
-easycrypt config                   # lists Alt-Ergo etc.?
-easycrypt llm -lastgoals some.ec   # exit 0 on a known-good file?
+bin/ec-call check_file  '{"path": "proofs/elgamal.ec"}'
+bin/ec-call try_snippet '{"path": "proofs/elgamal.ec", "snippet": "byequiv=> //.", "line": 78}'
 ```
-If the diagnostic regex misses lines, fix `DIAG_RE` in server.py (one place).
 
-## 6. Demo plan & risks
+## Troubleshooting
 
-**Demo:** Claude autonomously completes a small game-hopping proof (e.g., IND-CPA of a toy scheme) through the MCP tools, with the full tool-call trace shown; replayable because state = file. Pick the example from `easycrypt/examples/` — don't write a new proof from scratch.
+**On macOS, `docker run` with `-v` hangs forever and the container stays `Created`.** Docker Desktop
+has no permission to read that folder (anything under `~/Documents`, `~/Desktop`, `~/Downloads`).
+System Settings → Privacy & Security → Files and Folders → Docker → allow the folder (or give Docker
+Full Disk Access), then retry. Folders elsewhere (e.g. `~/code`) need no permission.
 
-**Pitch lines that are earned, not puffed:**
-- "The brief says bad scientific software has no endpoints for agentic control — we built that endpoint for the standard crypto-proof tool."
-- "Interface is isomorphic to how the Lean community exposes provers to LLMs (lean repl's snapshot model)."
-- "Upstream already added an `llm` batch mode — we built the agent layer they left open. Works with any MCP client, demoed on Claude."
+**Everything is slow and `nproc` inside a container says 1.** Docker Desktop's *Resource Saver*
+shrinks the VM when idle. Settings → Resources → Advanced → turn it off.
 
-**Risks:** install chain breaks on venue Wi-Fi (→ do it on hotel Wi-Fi; one machine suffices); `llm` output format drifts from our parser (→ smoke test, fix one regex); demo proof too hard for the agent (→ choose the smallest example that still reads "crypto", pre-run it); do **not** claim "first ever LLM×prover" — Lean ecosystem is full of prior art, our novelty is EasyCrypt + MCP + the strategy layer.
+**Step 1 fails (`denied` / `forbidden` / can't reach `ghcr.io`).** Build the base image yourself
+from EasyCrypt's repo. It's slower (around an hour, it compiles OCaml) but needs only GitHub:
 
-## Sources
+```bash
+git clone https://github.com/EasyCrypt/easycrypt
+docker build --platform linux/amd64 --target build -t ec-build-box easycrypt/scripts/docker
+docker build --platform linux/amd64 --build-arg BASE=ec-build-box -t easycrypt-mcp .
+```
 
-- [EasyCrypt repo/README](https://github.com/EasyCrypt/easycrypt) + its source (`src/ecOptions.ml`, `src/ec.ml`, `src/ecTerminal.ml`, `src/ecCommands.mli`), main @ 2026-10-17
-- [leanprover-community/repl](https://github.com/leanprover-community/repl) · [PyPantograph](https://github.com/stanford-centaur/PyPantograph) · [LeanDojo](https://github.com/lean-dojo/LeanDojo)
-- [Anthropic: Writing effective tools for agents](https://www.anthropic.com/engineering/writing-tools-for-agents)
+**The build fails at the self-test step.** EasyCrypt's `llm` command no longer behaves as this
+server expects. Try a known-good version with `--build-arg EC_REF=<older commit>`.
+
+**A tool returns `raw_stderr` but no `diagnostics`.** EasyCrypt printed errors in a format the
+parser doesn't recognise. Adjust `DIAG_RE` in `easycrypt_core.py` (the only place it's defined)
+and rebuild.
+
+**`No such file` for a file that exists.** You ran `claude mcp add` from a different folder, so it
+isn't mounted. Remove it with `claude mcp remove easycrypt` and repeat step 4 from the right folder.
+
+**Calls time out.** Raise `-timeout` in `EASYCRYPT_ARGS` and/or `EASYCRYPT_WALL`, especially on
+Apple Silicon.
+
+## Development
+
+The tests use a fake EasyCrypt binary, so they run anywhere with Python 3.10+, no Docker needed:
+
+```bash
+pip install mcp fastapi uvicorn pytest
+python -m pytest -q tests
+```
+
+To run the server against a local EasyCrypt install instead of Docker:
+
+```bash
+claude mcp add easycrypt -e EASYCRYPT_BIN=easycrypt -- python "$PWD/mcp_server.py"
+```
+
+| File | Purpose |
+|---|---|
+| `easycrypt_core.py` | All EasyCrypt logic: runs the CLI and parses its output. |
+| `mcp_server.py` | MCP server exposing the four tools to agents. |
+| `http_api.py` | Optional REST mirror of the same tools. |
+| `Dockerfile` | The image: EasyCrypt + solvers + this server. |
+| `tests/` | Fake `easycrypt` binary and smoke tests; `test_real.py` runs against the real binary when one is on PATH (CI does). |
+| `.github/workflows/image.yml` | Builds the image, runs the tests inside it against the real binary, publishes to GHCR. |
+| `.claude/skills/easycrypt-prover/` | The proof strategy the agent follows. |
+| `proofs/` | Demo proof files (`elgamal.ec` with one proof removed). |
+| `demo/elgamal.ec` | The complete original, used for the end-to-end `check_file` run; the agent is told not to read it. |
+| `ARCHITECTURE.md` | Decisions, the tool contract, and what is verified against the binary. |
