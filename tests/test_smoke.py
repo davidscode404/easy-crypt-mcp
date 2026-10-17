@@ -115,3 +115,16 @@ def test_search_lib(tmp_path, monkeypatch):
     assert ec.search_lib("foo")["matches"] == [{"file": "sub/X.eca", "line": 1, "text": "op foo : int."}]
     with pytest.raises(ec.ECError):
         ec.search_lib("(")
+
+
+def test_snippet_inherits_indentation(tmp_path):
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    f = make(tmp_path, "lemma l : true.\n  proof.\n  qed.\n")
+    r = ec.apply_snippet(str(f), "close.", line=3)
+    assert r.ok and f.read_text() == "lemma l : true.\n  proof.\n  close.\n  qed.\n"
+
+
+def test_negative_line_notice_is_parsed():
+    d, left = ec.parse_diagnostics("[warning] [elgamal.ec:-1] running on OCaml 5.2.1: regression\n")
+    assert left == "" and d[0].severity == "warning" and d[0].line == -1

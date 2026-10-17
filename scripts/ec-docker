@@ -1,7 +1,7 @@
 #!/bin/sh
 # Run EasyCrypt inside Docker with the current directory mounted at the same
-# path, so file paths given by server.py resolve identically in the container.
-# Usage: EASYCRYPT_BIN=/abs/path/scripts/ec-docker python server.py
+# path, so file paths given by the MCP server resolve identically in the container.
+# Usage: EASYCRYPT_BIN=/abs/path/scripts/ec-docker python mcp_server.py
 # No -t: a TTY would merge stderr into stdout and break diagnostic parsing.
 exec docker run --rm -i -v "$PWD":"$PWD" -w "$PWD" \
-  "${EASYCRYPT_IMAGE:-easycrypt}" easycrypt "$@"
+  "${EASYCRYPT_IMAGE:-ghcr.io/davidscode404/easy-crypt-mcp:main}" easycrypt "$@"

@@ -6,12 +6,17 @@
 ## What it is
 
 ```
- Claude Code (+ SKILL.md)  ──MCP/stdio──▶  docker run easycrypt-mcp
-                                             ├─ mcp_server.py   (6 tools)
-                                             └─ easycrypt llm   (upstream, unmodified)
-            ▲                                           │
-            └──── proofs/*.ec on the host, bind-mounted at the same path; the file is the state
+ Claude Code (+ SKILL.md)  ──MCP/stdio──▶  mcp_server.py (6 tools) ──▶ easycrypt llm (upstream, unmodified)
+            ▲                                                               │
+            └──── the .ec file is the state: proofs/*.ec, bind-mounted or local ◀┘
+
+ Live demo (demo/repair): browser ──SSE──▶ live_server.py ──▶ headless `claude -p` with the same
+ MCP server + SKILL.md as system prompt; per-session git repo; verdict = EasyCrypt's final check_file.
 ```
+
+Two ways to run EasyCrypt behind the server: the Docker image (`bin/easycrypt-mcp`, `.mcp.json`;
+server and binary both in the container) or a native/opam install (`live_server.py`; or the Docker
+binary through `scripts/ec-docker` with the server on the host).
 
 One container, one Python wrapper, no state of our own. Every tool call re-runs `easycrypt llm`
 on the file (Route A). The strategy — which tactic to try, when to call SMT, when to stop — lives
@@ -33,7 +38,7 @@ actionable message.
 | `goals_at(path, line, col?)` | `llm -upto L` | State **before** the command at `line` runs. |
 | `try_snippet(path, snippet, line?)` | temp copy + stop marker, `-upto end+1` | Inserts before `line` (default: EOF), runs **through** the snippet, returns goals after it. Never writes the file. |
 | `apply_snippet(path, snippet, line?, commit=True)` | `try_snippet` + write + `git commit` | Same check; if ok, writes the real file and commits `agent: <first line>`. Nothing written on failure. The only write path — one accepted step = one commit = the trace. |
-| `search_lib(pattern, limit?)` | regex over `theories/` source in the container | Finds textual declarations; names made by `clone … rename` (e.g. `dbool1E`) are invisible to it **[run]** — list the theory with `print <Theory>.` instead. |
+| `search_lib(pattern, limit?)` | regex over `theories/` source | Finds textual declarations; names made by `clone … rename` (e.g. `dbool1E`) are invisible to it **[run]** — list the theory with `print <Theory>.` instead. Needs the theories on the same filesystem as the server (true in the image and with a native install; with `scripts/ec-docker` set `EASYCRYPT_THEORIES` to a copy). |
 
 Discovery recipe: `search_lib` → `print <name>.` → `print <Theory>.` (lists a whole theory with
 statements **[run]**). EasyCrypt's own `search` prints nothing in batch mode **[run]**.
@@ -57,7 +62,12 @@ statements **[run]**). EasyCrypt's own `search` prints nothing in batch mode **[
    choice). When the budget is spent the agent stops and reports: goal, tactics tried, remaining
    goals. A partial run is still a correct demo. Details in the skill.
 7. **Demo: `examples/elgamal.ec`** — IND-CPA ⇔ DDH in three game hops, 134 lines, in EasyCrypt's
-   CI **[run]**. Blank one lemma's proof body and let the agent fill it.
+   CI **[run]**. Two tasks from it: *repair* — `demo/repair` deletes any one proof line on stage
+   (`demo/elgamal.ec` is the intact original) and a headless agent puts the proof back; *fill* —
+   `proofs/elgamal.ec` has `cpa_ddh0`'s body removed, used from Claude Code interactively and in the
+   with-vs-without-MCP comparison (`demo/replay`). Recorded fallbacks for both live in the repo
+   (`demo/repair/run`, `demo/replay/traces`): real EasyCrypt output; the agent prose shown with
+   `demo/repair`'s recording was written at recording time (`build_trace.py` NOTES).
 
 ## Facts about `easycrypt llm` the design depends on
 
@@ -65,7 +75,7 @@ statements **[run]**). EasyCrypt's own `search` prints nothing in batch mode **[
 |---|---|
 | goals → stdout; diagnostics → stderr as `[level] [loc] msg`; exit 0 ok / 1 fail | [run] |
 | `-upto L` is exclusive: the command starting at line L is not run | [run] |
-| `[loc]` formats: `File.ec: line 12 (3-10)` / `(3)` / `(3) to line 14 (7)` for errors **[run]**, `File.ec:12` for notices without a location **[src]** — `DIAG_RE` accepts all | [run] |
+| `[loc]` formats: `File.ec: line 12 (3-10)` / `(3)` / `(3) to line 14 (7)` for errors **[run]**, `File.ec:12` / `File.ec:-1` for notices without a location (e.g. the OCaml-version warning) **[run]** — `DIAG_RE` accepts all | [run] |
 | Log threshold is Warning: no `info` noise, and `search`/`locate` output is dropped | [run] |
 | `print` goes to stdout; `print <Theory>.` lists its contents | [run] |
 | `trivial`/`auto` never fail — an unclosed goal errors later at `qed.` ("cannot save an incomplete proof"). Closing attempts must be `by <tactic>.` | [run] |
@@ -97,6 +107,12 @@ on files whose *proofs* are expensive.
   source-found bugs fixed (`-upto` off-by-one, error-location regex, fake binary semantics); costs
   measured; the MCP server answers `initialize` / `tools/list` / `tools/call` over stdio inside the
   image; `proofs/elgamal.ec` fails exactly at the blanked `qed.` with the expected goal.
-- **Open:** a full run with Claude on `proofs/elgamal.ec` (first feedback on SKILL.md); merge to `main`.
-- **Owners:** ①② @davidscode404 · ③④ @Anna-199. Repo rules: tests run on Python ≥ 3.8 with the
+- **Rehearsed [run]:** a fresh agent with only the tools + skill filled `cpa_ddh0` from empty (25 calls,
+  6 commits; `wp; call` and `smt(expM)` differ from the shipped proof) and, in a second run, repaired
+  the file with `swap{1} 7 -5.` deleted (6 calls, 1 commit). The agent disclosed recognising the
+  shipped example; its goal-based reasoning is recorded. The repair run exposed that the skill lacked
+  repair guidance — now its *Repairing an existing proof* section.
+- **Open:** rehearse `demo/repair` live on the demo machine (needs Python ≥ 3.10, `claude` CLI, and
+  EasyCrypt native or via `scripts/ec-docker`); pin `EC_REF`.
+- **Owners:** ①② @davidscode404 · ③ @Anna-199 · `demo/` @JingxinQiao. Repo rules: tests run on Python ≥ 3.8 with the
   fake binary; real-binary tests auto-skip without `easycrypt` on PATH and run in CI.

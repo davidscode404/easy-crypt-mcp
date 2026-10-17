@@ -33,7 +33,7 @@ binary.
 | [`demo/replay/`](demo/replay) | Side-by-side replay of an agent with the MCP tools vs. without them. |
 | [`examples/`](examples) | Two tiny smoke-test proofs, one closed and one with an open goal. |
 | [`tests/`](tests) | `test_smoke.py` uses a fake binary and runs anywhere. `test_real.py` needs real EasyCrypt. |
-| [`server.py`](server.py), [`scripts/ec-docker`](scripts/ec-docker) | The first single-file version of the server, kept for reference. Use `mcp_server.py` instead. |
+| [`scripts/ec-docker`](scripts/ec-docker) | Runs `easycrypt` inside the image with the current directory mounted, for `EASYCRYPT_BIN=scripts/ec-docker` (the live demo without a native install). |
 
 ---
 
@@ -240,9 +240,24 @@ Then open <http://127.0.0.1:8765>.
 
 ---
 
-## Other ways to call the tools
+## Using the tools without Claude Code
 
-Call one tool from the shell through the real MCP server, in Docker:
+The MCP server is one of four ways in. All four sit on the same core module, `easycrypt_core.py`,
+so they behave identically.
+
+**Any MCP client.** MCP is an open standard; Claude Desktop, Cursor, VS Code, Codex CLI, Gemini CLI
+and others take the same server definition that `.mcp.json` gives Claude Code. Point your client at
+the launcher (it runs the server and EasyCrypt in Docker, with the current directory mounted):
+
+```json
+{"mcpServers": {"easycrypt": {"command": "sh", "args": ["/abs/path/to/easy-crypt-mcp/bin/easycrypt-mcp"]}}}
+```
+
+Start the client from the folder that holds your `.ec` files. The strategy in
+[`SKILL.md`](.claude/skills/easycrypt-prover/SKILL.md) is plain text: paste it into the client's
+system prompt or rules file if it does not load Claude Code skills.
+
+**No agent at all - a person or a script.** Call one tool from the shell through the real MCP server:
 
 ```bash
 bin/ec-call check_file '{"path": "proofs/elgamal.ec"}'
@@ -251,11 +266,26 @@ bin/ec-call check_file '{"path": "proofs/elgamal.ec"}'
 bin/ec-call goals_at '{"path": "proofs/elgamal.ec", "line": 78}'
 ```
 
-Use the REST API with an interactive page at <http://localhost:8000/docs>:
+Or use the REST mirror from any language, with an interactive page at <http://localhost:8000/docs>:
 
 ```bash
 docker run --rm --platform linux/amd64 -p 8000:8000 -v "$PWD:$PWD" -w "$PWD" easycrypt-mcp python3 -m uvicorn --app-dir /app http_api:app --host 0.0.0.0 --port 8000
 ```
+
+**As a Python library.** With EasyCrypt on `PATH` (or `EASYCRYPT_BIN` pointing at `scripts/ec-docker`),
+no server is needed:
+
+```python
+import easycrypt_core as ec
+r = ec.check_file("proofs/elgamal.ec")
+print(r.ok, r.diagnostics, r.goals)
+```
+
+**Your own agent.** For batch runs, CI gates or evaluations, register the six functions of
+`easycrypt_core` as tools with an LLM API SDK (for example the Anthropic SDK's tool runner), use
+`SKILL.md` as the system prompt, and you have a standalone prover with no editor or MCP client in
+the loop. The demo's own driver, [`demo/repair/live_server.py`](demo/repair/live_server.py), is a
+middle path: it starts headless Claude Code (`claude -p`) with the MCP server attached.
 
 ## Tests
 

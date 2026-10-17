@@ -22,7 +22,7 @@ RUN opam pin add -n easycrypt "https://github.com/EasyCrypt/easycrypt.git#${EC_R
  && opam exec -- easycrypt why3config \
  && opam exec -- easycrypt config
 
-# Fail the build now, not on stage, if the `llm` subcommand doesn't behave as server.py expects.
+# Fail the build now, not on stage, if the `llm` subcommand doesn't behave as easycrypt_core.py expects.
 RUN printf 'lemma t : true.\nproof. trivial. qed.\n' > /tmp/Ok.ec \
  && printf 'lemma t : false.\nproof. trivial. qed.\n' > /tmp/Bad.ec \
  && cd /tmp && opam exec -- easycrypt llm -lastgoals Ok.ec \
