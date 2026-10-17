@@ -38,8 +38,9 @@ def check_file(path: str) -> dict:
 
 @mcp.tool()
 def goals_at(path: str, line: int, col: int | None = None) -> dict:
-    """Show the proof state (open goals) after checking the file up to `line` (1-based),
-    optionally `col`. Use this to see what you need to prove before choosing a tactic."""
+    """Show the proof state (open goals) just BEFORE line `line` (1-based) runs, i.e. after
+    everything above it; optional `col` (0-based) stops before the command starting there.
+    To see the state after line N, ask for line N+1. Use this before choosing a tactic."""
     return _wrap(ec.goals_at, path, line, col)
 
 

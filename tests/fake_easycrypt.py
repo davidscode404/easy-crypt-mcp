@@ -1,27 +1,42 @@
 #!/usr/bin/env python3
 """Stand-in for `easycrypt` so the server can be tested without an install.
-Rule: any line containing `admit` or `FAIL` is an error. Emits the documented llm output format."""
+
+Mimics real EasyCrypt r2026.09 behaviour that the server depends on:
+- each non-blank line is one command; a line containing `admit` or `FAIL` is an error;
+  a line containing `close` closes the current goal;
+- diagnostics use the real format `[critical] [File.ec: line N (C1-C2)] msg`;
+- `-upto LINE` is EXCLUSIVE: stops before the first command starting at or after LINE,
+  prints goals, exits 0. If no command comes after, it runs to the end and prints nothing.
+"""
 import sys
 
 args = sys.argv[1:]
 if args[:1] == ["config"]:
-    print("Fake EasyCrypt\nprovers: Alt-Ergo@2.6.0 Z3@4.12.6")
+    print("known provers: Alt-Ergo@2.6.4, Z3@4.12.6")
     sys.exit(0)
 
 file = args[-1]
 upto = int(args[args.index("-upto") + 1].split(":")[0]) if "-upto" in args else None
-lines = open(file).read().splitlines()
-limit = upto or len(lines)
+goal = "false"
 
-for i, l in enumerate(lines[:limit], 1):
+
+def goals():
+    return "Current goal\n\nType variables: <none>\n\n" + "-" * 72 + "\n" + goal if goal else "No more goals"
+
+
+for i, l in enumerate(open(file).read().splitlines(), 1):
+    if not l.strip():
+        continue
+    if upto is not None and i >= upto:
+        print(goals())
+        sys.exit(0)
     if "admit" in l or "FAIL" in l:
-        # Same shape as real EasyCrypt r2026.09 output.
         print(f"[critical] [{file}: line {i} (0-{len(l)})] cannot apply tactic\n  (details on a continuation line)",
               file=sys.stderr)
         if "-lastgoals" in args:
-            print("Current goal\n\nType variables: <none>\n\n" + "-" * 72 + "\nforall x, x = x")
+            print(goals())
         sys.exit(1)
+    if "close" in l:
+        goal = None
 
-if upto:
-    print(f"Current goal (after line {upto})\n\n------------------------\ntrue")
 sys.exit(0)

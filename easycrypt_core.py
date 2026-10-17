@@ -142,13 +142,18 @@ def check_file(path: str) -> Result:
 
 
 def goals_at(path: str, line: int, col: int | None = None) -> Result:
-    """Proof state after checking up to LINE[:COL]."""
+    """Proof state just BEFORE the first command starting at LINE (or at LINE:COL, col 0-based),
+    i.e. after everything above it. EasyCrypt's -upto is exclusive (src/ec.ml `past_upto`)."""
     f = _resolve(path)
     n = len(f.read_text().splitlines())
     if not 1 <= line <= n:
         raise ECError(f"line {line} out of range (file has {n} lines)")
     pos = f"{line}:{col}" if col is not None else str(line)
-    return _llm(f, ["-upto", pos])
+    res = _llm(f, ["-upto", pos])
+    if res.ok and not res.goals:
+        res.note = ("No command starts at or after this position, so EasyCrypt printed no goals. "
+                    "Use check_file for the end-of-file state.")
+    return res
 
 
 def try_snippet(path: str, snippet: str, line: int | None = None) -> Result:
@@ -162,7 +167,10 @@ def try_snippet(path: str, snippet: str, line: int | None = None) -> Result:
     if lines and not lines[-1].endswith("\n"):
         lines[-1] += "\n"
     snip = snippet if snippet.endswith("\n") else snippet + "\n"
-    patched = lines[: at - 1] + [snip] + lines[at - 1 :]
+    # -upto is exclusive and prints goals only when it meets a later command, so stop at the
+    # line after the snippet and append a stop marker in case nothing follows. The marker is
+    # only parsed, never executed: EasyCrypt halts before running the first command past -upto.
+    patched = lines[: at - 1] + [snip] + lines[at - 1 :] + ["qed.\n"]
     end_line = at - 1 + len(snip.splitlines())
 
     # Same directory so `require` of sibling theories resolves; unique name so parallel calls
@@ -170,7 +178,7 @@ def try_snippet(path: str, snippet: str, line: int | None = None) -> Result:
     tmp = f.parent / f"Try_{uuid.uuid4().hex[:12]}{f.suffix}"
     try:
         tmp.write_text("".join(patched))
-        res = _llm(tmp, ["-upto", str(end_line)])
+        res = _llm(tmp, ["-upto", str(end_line + 1)])
     finally:
         for p in (tmp, tmp.with_suffix(".eco")):
             p.unlink(missing_ok=True)

@@ -40,12 +40,21 @@ def test_unparsed_output_is_surfaced():
 def test_check_ok_and_fail(tmp_path):
     assert ec.check_file(str(make(tmp_path, "lemma l : true.\nproof. trivial. qed.\n"))).ok
     r = ec.check_file(str(make(tmp_path, "lemma l : true.\nproof. admit. qed.\n")))
-    assert not r.ok and r.diagnostics[0].line == 2 and "forall" in r.goals
+    assert not r.ok and r.diagnostics[0].line == 2 and "false" in r.goals
 
 
-def test_goals_at(tmp_path):
-    r = ec.goals_at(str(make(tmp_path, "a\nb\nc\n")), 2)
-    assert r.ok and "line 2" in r.goals
+def test_goals_at_is_exclusive(tmp_path):
+    f = make(tmp_path, "lemma l : false.\nclose.\nqed.\n")
+    assert "false" in ec.goals_at(str(f), 2).goals          # before `close` runs
+    assert ec.goals_at(str(f), 3).goals == "No more goals"  # after it
+
+
+def test_try_snippet_reports_state_after_snippet(tmp_path):
+    # Regression: real -upto is exclusive; the snippet must actually run, mid-file and at EOF.
+    f = make(tmp_path, "lemma l : false.\nproof.\nqed.\n")
+    assert ec.try_snippet(str(f), "close.", line=3).goals == "No more goals"
+    assert ec.try_snippet(str(f), "close.").goals == "No more goals"  # appended at end of file
+    assert "false" in ec.try_snippet(str(f), "proof.", line=3).goals
 
 
 def test_try_snippet_never_mutates(tmp_path):
