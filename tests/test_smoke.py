@@ -17,9 +17,24 @@ def make(tmp_path, body):
 
 
 def test_parse_real_format():
-    d, left = ec.parse_diagnostics("[error] [Foo.ec:12:3] bad\n  more\n[warning] [Foo.ec:2] w")
-    assert [(x.severity, x.line, x.col) for x in d] == [("error", 12, 3), ("warning", 2, None)]
-    assert d[0].message == "bad\n  more" and left == ""
+    # Captured verbatim from EasyCrypt r2026.09, plus the other two forms from ecLocation.ml.
+    d, left = ec.parse_diagnostics(
+        "[critical] [Bad.ec: line 2 (16-20)] cannot save an incomplete proof\n"
+        "  more detail\n"
+        "[warning] [My File.ec: line 5 (3)] point\n"
+        "[error] [sub/X.ec: line 2 (16) to line 4 (3)] span\n"
+    )
+    assert [(x.severity, x.file, x.line, x.col, x.end_line, x.end_col) for x in d] == [
+        ("critical", "Bad.ec", 2, 16, 2, 20),
+        ("warning", "My File.ec", 5, 3, 5, 3),
+        ("error", "sub/X.ec", 2, 16, 4, 3),
+    ]
+    assert d[0].message == "cannot save an incomplete proof\n  more detail" and left == ""
+
+
+def test_unparsed_output_is_surfaced():
+    d, left = ec.parse_diagnostics("something unexpected\n")
+    assert d == [] and left == "something unexpected"
 
 
 def test_check_ok_and_fail(tmp_path):

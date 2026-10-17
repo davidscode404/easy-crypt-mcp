@@ -15,9 +15,11 @@ limit = upto or len(lines)
 
 for i, l in enumerate(lines[:limit], 1):
     if "admit" in l or "FAIL" in l:
-        print(f"[critical] [{file}:{i}] cannot apply tactic\n  (details on a continuation line)", file=sys.stderr)
+        # Same shape as real EasyCrypt r2026.09 output.
+        print(f"[critical] [{file}: line {i} (0-{len(l)})] cannot apply tactic\n  (details on a continuation line)",
+              file=sys.stderr)
         if "-lastgoals" in args:
-            print("Current goal\n\n------------------------\nforall x, x = x")
+            print("Current goal\n\nType variables: <none>\n\n" + "-" * 72 + "\nforall x, x = x")
         sys.exit(1)
 
 if upto:

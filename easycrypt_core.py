@@ -24,10 +24,16 @@ EC_ARGS = shlex.split(os.environ.get("EASYCRYPT_ARGS", ""))
 EC_ROOT = os.environ.get("EASYCRYPT_ROOT")
 WALL = float(os.environ.get("EASYCRYPT_WALL", "120"))
 
-# ⚠️ The one place to fix if real `llm` output differs.
-# Expected: "[Severity] [file:LINE] message" or "[Severity] [file:LINE:COL] message".
+# Verified against a real build (r2026.09) and src/ecLocation.ml `tostring`. Three location forms:
+#   [critical] [Bad.ec: line 2 (16-20)] msg              same line, cols 16..20
+#   [critical] [Bad.ec: line 2 (16)] msg                 single point
+#   [critical] [Bad.ec: line 2 (16) to line 4 (3)] msg   spans lines
+# Columns are 0-based.
 DIAG_RE = re.compile(
-    r"^\[(?P<severity>[A-Za-z]+)\]\s*\[(?P<file>[^\]]+?):(?P<line>\d+)(?::(?P<col>\d+))?\]\s*(?P<message>.*)$"
+    r"^\[(?P<severity>[A-Za-z]+)\]\s*"
+    r"\[(?P<file>.+?): line (?P<line>\d+) \((?P<col>\d+)(?:-(?P<end_col>\d+))?\)"
+    r"(?: to line (?P<end_line>\d+) \((?P<end_col2>\d+)\))?\]\s*"
+    r"(?P<message>.*)$"
 )
 
 
@@ -36,7 +42,9 @@ class Diagnostic:
     severity: str
     file: str
     line: int
-    col: int | None
+    col: int | None  # 0-based
+    end_line: int | None
+    end_col: int | None
     message: str
 
 
@@ -75,11 +83,16 @@ def parse_diagnostics(stderr: str) -> tuple[list[Diagnostic], str]:
     for line in stderr.splitlines():
         m = DIAG_RE.match(line.strip())
         if m:
+            line_no = int(m["line"])
+            end_line = int(m["end_line"]) if m["end_line"] else line_no
+            end_col = m["end_col"] or m["end_col2"] or m["col"]
             diags.append(Diagnostic(
                 severity=m["severity"].lower(),
                 file=m["file"],
-                line=int(m["line"]),
-                col=int(m["col"]) if m["col"] else None,
+                line=line_no,
+                col=int(m["col"]),
+                end_line=end_line,
+                end_col=int(end_col),
                 message=m["message"].strip(),
             ))
         elif diags and line.strip():

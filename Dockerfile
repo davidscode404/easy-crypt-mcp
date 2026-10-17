@@ -11,7 +11,7 @@
 #   docker build --platform linux/amd64 --build-arg BASE=ec-build-box -t easycrypt-mcp .
 
 ARG BASE=ghcr.io/easycrypt/ec-build-box:main
-FROM --platform=linux/amd64 ${BASE}
+FROM ${BASE}
 
 # Pin to a commit for a reproducible demo, e.g. --build-arg EC_REF=<sha>
 ARG EC_REF=main
