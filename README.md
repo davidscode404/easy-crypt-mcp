@@ -130,6 +130,13 @@ docker run --rm --platform linux/amd64 -p 8000:8000 -v "$PWD:$PWD" -w "$PWD" eas
 
 Open <http://localhost:8000/docs> for an interactive page where you can try each call.
 
+Or call one tool from the shell through the real MCP server (one container per call):
+
+```bash
+bin/ec-call check_file  '{"path": "proofs/elgamal.ec"}'
+bin/ec-call try_snippet '{"path": "proofs/elgamal.ec", "snippet": "byequiv=> //.", "line": 78}'
+```
+
 ## Troubleshooting
 
 **On macOS, `docker run` with `-v` hangs forever and the container stays `Created`.** Docker Desktop

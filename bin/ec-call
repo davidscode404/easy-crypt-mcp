@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Call one easycrypt MCP tool from the shell, through the real server over stdio.
+
+  bin/ec-call check_file  '{"path": "proofs/elgamal.ec"}'
+  bin/ec-call goals_at    '{"path": "proofs/elgamal.ec", "line": 78}'
+  bin/ec-call try_snippet '{"path": "proofs/elgamal.ec", "snippet": "byequiv=> //.", "line": 78}'
+  bin/ec-call tools                      # list tools
+
+Relative paths are resolved against the current directory, which is mounted into the container
+at the same absolute path. Prints the tool's JSON result. Env: EASYCRYPT_IMAGE, EASYCRYPT_APP
+(a host dir to mount over /app, for testing unreleased server code).
+"""
+import json, os, subprocess, sys
+root = os.getcwd()
+img = os.environ.get("EASYCRYPT_IMAGE", "ghcr.io/davidscode404/easy-crypt-mcp:anna")
+cmd = ["docker", "run", "-i", "--rm", "-v", f"{root}:{root}", "-w", root,
+       "-e", f"EASYCRYPT_ROOT={root}", "-e", "EASYCRYPT_ARGS=" + os.environ.get("EASYCRYPT_ARGS", "-timeout 10")]
+if os.environ.get("EASYCRYPT_APP"):
+    cmd += ["-v", f"{os.environ['EASYCRYPT_APP']}:/app"]
+cmd += [img, "python3", "/app/mcp_server.py"]
+if len(sys.argv) < 2: sys.exit(__doc__)
+tool = sys.argv[1]
+args = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+if "path" in args and not os.path.isabs(args["path"]):
+    args["path"] = os.path.join(root, args["path"])
+p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+def send(i, method, params):
+    p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params}) + "\n"); p.stdin.flush()
+    while True:
+        ln = p.stdout.readline()
+        if not ln: sys.exit("server exited:\n" + p.stderr.read())
+        try: m = json.loads(ln)
+        except ValueError: continue
+        if m.get("id") == i: return m
+send(1, "initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "ec-call", "version": "0"}})
+p.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n"); p.stdin.flush()
+if tool == "tools":
+    out = [t["name"] for t in send(2, "tools/list", {})["result"]["tools"]]
+else:
+    m = send(2, "tools/call", {"name": tool, "arguments": args})
+    if "error" in m: out = m["error"]
+    else:
+        txt = m["result"]["content"][0]["text"]
+        try: out = json.loads(txt)
+        except ValueError: out = txt
+p.stdin.close(); p.wait(timeout=30)
+print(json.dumps(out, indent=2, ensure_ascii=False) if not isinstance(out, str) else out)
