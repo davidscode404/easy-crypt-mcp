@@ -92,8 +92,10 @@ on files whose *proofs* are expensive.
 
 ## Status
 
-- **Done [run]:** image builds and publishes from CI; 6 tools; 10/10 real-binary tests; three
-  source-found bugs fixed (`-upto` off-by-one, error-location regex, fake binary semantics); costs measured.
-- **Open:** SKILL.md (③); the demo file with one proof blanked (④).
+- **Done [run]:** image builds and publishes from CI; 6 tools; real-binary tests; three
+  source-found bugs fixed (`-upto` off-by-one, error-location regex, fake binary semantics); costs
+  measured; the MCP server answers `initialize` / `tools/list` / `tools/call` over stdio inside the
+  image; `proofs/elgamal.ec` fails exactly at the blanked `qed.` with the expected goal.
+- **Open:** a full run with Claude on `proofs/elgamal.ec` (first feedback on SKILL.md); merge to `main`.
 - **Owners:** ①② @davidscode404 · ③④ @Anna-199. Repo rules: tests run on Python ≥ 3.8 with the
   fake binary; real-binary tests auto-skip without `easycrypt` on PATH and run in CI.

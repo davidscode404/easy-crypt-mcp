@@ -48,7 +48,9 @@ docker run --rm --platform linux/amd64 easycrypt-mcp easycrypt config
 
 You should see Alt-Ergo, Z3 and CVC5 listed.
 
-**4. Connect it to Claude Code.** `cd` into the folder holding your `.ec` proof files, then:
+**4. Connect it to Claude Code.** If your proofs live in this repo (like the demo), just open the
+repo in Claude Code: [`.mcp.json`](.mcp.json) registers the server via [`bin/easycrypt-mcp`](bin/easycrypt-mcp)
+— approve it when asked. For proofs elsewhere, `cd` into their folder, then:
 
 ```bash
 claude mcp add easycrypt -- docker run -i --rm --platform linux/amd64 \
