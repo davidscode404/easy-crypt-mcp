@@ -63,10 +63,11 @@ def apply_snippet(path: str, snippet: str, line: int | None = None, commit: bool
 
 @mcp.tool()
 def search_lib(pattern: str, limit: int = 40) -> dict:
-    """Search EasyCrypt's standard library for a case-insensitive regex — a name fragment like
-    `dbool1` or a statement shape like `mu1 .* dbool`. Declarations come first. Then see a hit's
-    full statement with try_snippet(path, "print <name>."). (EasyCrypt's own `search` command
-    prints nothing in batch mode, so use this instead.)"""
+    """Grep EasyCrypt's standard library source for a case-insensitive regex — a name fragment
+    like `dbool` or a statement shape like `mu1 .* dunifin`. Declarations come first. Then see a
+    hit's full statement with try_snippet(path, "print <name>."). Textual only: names created by
+    `clone … rename` (e.g. `dbool1E`) are not declared anywhere — list a theory instead with
+    try_snippet(path, "print <Theory>."). (EasyCrypt's own `search` prints nothing in batch mode.)"""
     try:
         return ec.search_lib(pattern, limit)
     except ec.ECError as e:

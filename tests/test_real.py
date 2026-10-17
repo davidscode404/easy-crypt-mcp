@@ -98,6 +98,13 @@ def test_apply_snippet_real(tmp_path):
     assert ec.check_file(str(f)).ok
 
 
-def test_search_lib_finds_dbool1E():
-    r = ec.search_lib(r"lemma dbool1E")
+def test_search_lib_finds_a_literal_declaration():
+    r = ec.search_lib(r"lemma dboolE")
     assert r["total"] >= 1 and r["matches"][0]["file"].endswith("DBool.ec"), r
+
+
+def test_search_lib_cannot_see_clone_renamed_names():
+    # dbool1E is dunifin1E under `clone include Distr.MFinite … rename "dunifin" as "dbool"`:
+    # it is never declared textually, so only its *uses* match. `print dbool1E.` is the way.
+    r = ec.search_lib(r"lemma dbool1E")
+    assert r["total"] == 0, r

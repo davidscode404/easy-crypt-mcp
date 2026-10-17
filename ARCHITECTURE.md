@@ -1,153 +1,99 @@
 # Architecture
 
-*Decisions as of 2026-10-17 (hack day). Facts marked **[src]** were verified by reading EasyCrypt's
-source (`main` @ 2026-10-17); facts marked **[run]** were verified against a built binary. Nothing is
-**[run]**-verified yet — the Docker image is being built. Owners: ①② @davidscode404, ③④ @Anna-199.*
+*2026-10-17. **[run]** = verified against the real binary in the Docker image (CI + local);
+**[src]** = verified by reading EasyCrypt's source (`main` @ 2026-10-17) but not yet exercised.*
 
-## 0. What this is
-
-An MCP endpoint that lets an agent drive EasyCrypt proofs, plus a strategy layer that tells the agent
-how to use it. The endpoint is the thing the judging brief says scientific software lacks; the
-strategy layer is what makes the demo an agent proving something rather than an API being poked.
-
-Non-goals: a stateful REPL (Route B, see D1); a general prover UI; any claim of being first — the Lean
-ecosystem (lean `repl`, PyPantograph, LeanDojo) did this years ago. Our novelty is EasyCrypt + MCP +
-the strategy layer.
-
-## 1. Layers
+## What it is
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ ④ Demo proof      one .ec from easycrypt/examples (candidate: elgamal.ec) │  @Anna-199   TODO
-├──────────────────────────────────────────────────────────────────────┤
-│ ③ Strategy        .claude/skills/easycrypt-prover/SKILL.md               │  @Anna-199   TODO
-│                   the agent loop as a state machine, see §4               │
-├──────────────────────────────────────────────────────────────────────┤
-│ ② Endpoint        easycrypt_core.py + mcp_server.py (+ http_api.py)      │  @davidscode404  DONE*
-│                   6 tools, see §2 — the only frozen interface             │
-├──────────────────────────────────────────────────────────────────────┤
-│ ① EasyCrypt       Docker: ghcr.io/easycrypt/ec-build-box + easycrypt     │  @davidscode404  BUILDING
-└──────────────────────────────────────────────────────────────────────┘
-   * DONE against a fake binary; three source-verified bugs queued, see §7
+ Claude Code (+ SKILL.md)  ──MCP/stdio──▶  docker run easycrypt-mcp
+                                             ├─ mcp_server.py   (6 tools)
+                                             └─ easycrypt llm   (upstream, unmodified)
+            ▲                                           │
+            └──── proofs/*.ec on the host, bind-mounted at the same path; the file is the state
 ```
 
-Each layer can be replaced without touching the others **as long as the ②↔③ contract in §2 holds**.
-The strategy layer is developed against `tests/fake_easycrypt.py` for plumbing and against the Docker
-image for semantics — the fake does not understand tactics, so it can only prove the loop runs, not
-that the strategy proves anything.
+One container, one Python wrapper, no state of our own. Every tool call re-runs `easycrypt llm`
+on the file (Route A). The strategy — which tactic to try, when to call SMT, when to stop — lives
+in a Claude Code skill in this repo, not in the server.
 
-## 2. The ②↔③ contract (frozen)
+Non-goals: a stateful REPL (snapshot ids, undo); any claim of novelty beyond *EasyCrypt + MCP +
+strategy layer* — the Lean ecosystem (lean `repl`, PyPantograph, LeanDojo) did the pattern first.
 
-All tools return a dict. Success shape:
+## The tools (frozen contract between server and skill)
 
-```
-{ ok: bool, exit_code: int,
-  diagnostics: [{severity: "warning"|"critical", file, line, col|null, message}],
-  goals: str,          # pretty-printed open goals (stdout of easycrypt), "" if none
-  raw_stderr: str,     # only when nothing parsed, so the agent still sees something
-  note: str }
-```
-Usage errors the agent can fix (bad path, line out of range, binary missing, wall-clock exceeded)
-come back as `{ ok: false, error: "<actionable message>" }`, never as exceptions.
+All return a dict `{ok, exit_code, diagnostics[{severity,file,line,col,message}], goals, raw_stderr,
+note, commit}`; usage errors return `{ok:false, error}` with an actionable message.
 
-| Tool | Wraps | Semantics the agent must know |
+| Tool | Runs | What the skill must know |
 |---|---|---|
-| `easycrypt_config()` | `easycrypt config` | Call once. No solvers listed ⇒ every `smt` will fail. |
-| `check_file(path)` | `llm -lastgoals F` | Whole file. `ok` ⇔ exit 0. On failure `goals` = goals at the failing point. |
-| `goals_at(path, line, col?)` | `llm -upto L[:C] F` | State **before** the command starting at `line` runs (Proof General semantics). |
-| `try_snippet(path, snippet, line?)` | temp copy + `llm -upto` | Inserts `snippet` before `line` in a temp copy, runs **through** the snippet, returns goals after it. Never writes the real file. Insert before `qed.`, not at EOF (at EOF there is no next command to stop at, so no goals are printed). |
-| `apply_snippet(path, snippet, line?)` **(new, D4)** | `try_snippet` + write + `git commit` | Same check; if `ok`, writes the real file and commits with message `agent: <first line of snippet>`. The only write path. |
-| `search_lib(pattern, limit?)` **(new, D5)** | grep over the stdlib `theories/` inside the container | `[{file, line, text}]`. Names found here are then inspected with `try_snippet(path, "print <name>.", line)`. |
+| `easycrypt_config()` | `easycrypt config` | Call once; lists solvers. |
+| `check_file(path)` | `llm -lastgoals F` | Whole file. On failure `goals` holds the goals at the failing point. |
+| `goals_at(path, line, col?)` | `llm -upto L` | State **before** the command at `line` runs. |
+| `try_snippet(path, snippet, line?)` | temp copy, `-upto end+1` | Inserts before `line`, runs **through** the snippet, returns goals after it. Never writes the file. Insert before `qed.`, not at EOF. |
+| `apply_snippet(path, snippet, line?, commit=True)` | `try_snippet` + write + `git commit` | Same check; if ok, writes the real file and commits `agent: <first line>`. Nothing written on failure. The only write path — one accepted step = one commit = the trace. |
+| `search_lib(pattern, limit?)` | regex over `theories/` source in the container | Finds textual declarations; names made by `clone … rename` (e.g. `dbool1E`) are invisible to it **[run]** — list the theory with `print <Theory>.` instead. |
 
-Exact statement of a known name: `try_snippet(path, "print Foo.", line)` — `print` writes to stdout
-**[src]**, so it comes back in `goals`. Pattern search via EasyCrypt's own `search` does **not** work
-through this interface, see §3.
+Discovery recipe: `search_lib` → `print <name>.` → `print <Theory>.` (lists a whole theory with
+statements **[run]**). EasyCrypt's own `search` prints nothing in batch mode **[run]**.
 
-## 3. Verified facts about `easycrypt llm` **[src]**
+## Decisions
 
-| Fact | Where | Consequence for ② |
-|---|---|---|
-| Goals (`-upto`, `-lastgoals`) → **stdout**; diagnostics → **stderr** | `ec.ml`, `ecTerminal.ml` | as designed |
-| Exit 0 = accepted or `-upto` reached; 1 = failure | `ec.ml` | `ok = (exit == 0)` |
-| `-upto L` is **exclusive**: a command whose start line ≥ L is not run; goals are printed and the process exits 0 | `ec.ml` `past_upto` | **B1** `try_snippet` must use `end_line + 1` |
-| Diagnostics have **two** location formats: `[level] [file:LINE] msg` for notices without a precise location, and `[level] [file: line L (c)]`, `[file: line L (c1-c2)]`, `[file: line L1 (c1) to line L2 (c2)]` for errors carrying a location — i.e. **every proof failure** | `ecTerminal.ml` `_notice`, `ecLocation.ml` `tostring` | **B2** `DIAG_RE` must accept both |
-| Multi-line messages continue on following lines | `ecTerminal.ml` | continuation logic already correct |
-| Log threshold is hard-coded **Warning**: `info`/`debug` never reach stderr; levels print lowercase | `ecTerminal.ml`, `ecGState.ml` | no `added lemma:` noise; `search`/`locate` output is Info and therefore **dropped** |
-| `print` writes to `Format.std_formatter` | `ecCommands.ml` `process_print` | exact-name lookup works through `try_snippet` |
-| Flags: `-p NAME` (repeatable), `-timeout SEC`, `-quorum N`, `-cpu-factor N`, `-check-all`, `-pragmas a,b`, `-lastgoals`, `-upto L[:C]` | `ecOptions.ml` | `EASYCRYPT_ARGS` as documented is correct |
-| Default SMT timeout is **3 s** | `ec.ml` `cm_timeout = odfl 3` | set `EASYCRYPT_ARGS="-timeout 10"` for agent use |
-| Silent progress mode writes nothing else to stderr | `ecTerminal.ml` | stderr is clean, parse everything |
+1. **File-as-state (Route A).** No session manager; crash recovery and parallel calls are free;
+   `git log -p` of the proof file is the complete agent trace. Cost: every `-upto` call replays from
+   line 1 (see Costs). Route B is the upgrade path if that ever hurts; the tool schema would not change.
+2. **Docker on EasyCrypt's own CI image.** Solvers preinstalled; the build self-tests `llm`; CI
+   publishes `ghcr.io/davidscode404/easy-crypt-mcp:<branch>` so nobody builds locally. amd64 only
+   (native on Intel, emulated on Apple Silicon).
+3. **Strategy = `.claude/skills/easycrypt-prover/SKILL.md`.** Versioned, visible to judges, written
+   against the fake binary for plumbing and the image for semantics. Clients other than Claude Code
+   paste it into their system prompt.
+4. **The server owns writes** (`apply_snippet`). Works for any MCP client; the trace is a mechanism,
+   not an instruction the agent might skip; the written bytes are exactly the tested bytes.
+5. **Discovery is a tool** (`search_lib`), because the stdlib is inside the container where the
+   agent's own grep cannot see it, and `search` is silent in batch mode.
+6. **The loop has a terminal HANDOFF state.** Proof search is stochastic (SMT timeouts, tactic
+   choice). When the budget is spent the agent stops and reports: goal, tactics tried, remaining
+   goals. A partial run is still a correct demo. Details in the skill.
+7. **Demo: `examples/elgamal.ec`** — IND-CPA ⇔ DDH in three game hops, 134 lines, in EasyCrypt's
+   CI **[run]**. Blank one lemma's proof body and let the agent fill it.
 
-## 4. The agent loop (③) as a state machine
+## Facts about `easycrypt llm` the design depends on
 
-```
-          ┌────────────────────────────────────────────────────────────┐
-          ▼                                                            │
-  INSPECT  goals_at(file, L)  ──►  PLAN  pick tactic for first goal    │
-                                       │                               │
-                                       ▼                               │
-                                  TRY  try_snippet(file, tactic, L)    │
-                                   │ ok                  │ fail        │
-                                   ▼                     ▼             │
-          APPLY  apply_snippet (writes + commits)    RECOVER  ladder:   │
-                 │                                   1. simpler/explicit tactic
-                 ▼                                   2. smt with hints ← search_lib + print
-          CHECK  check_file ── ok ──► DONE           3. split the goal
-                 │ not ok                            tries < budget? ──► TRY ─┘
-                 └────────────────────────────────────┘ budget spent
-                                                             │
-                                                             ▼
-                                                   HANDOFF  stop, report:
-                                                   goal stuck on, tactics tried,
-                                                   remaining goals, last diagnostics
-```
+| Fact | Status |
+|---|---|
+| goals → stdout; diagnostics → stderr as `[level] [loc] msg`; exit 0 ok / 1 fail | [run] |
+| `-upto L` is exclusive: the command starting at line L is not run | [run] |
+| Two `[loc]` formats: `File.ec:12` (notices) and `File.ec: line 12 (3-10)` (errors) — `DIAG_RE` accepts both | [run] |
+| Log threshold is Warning: no `info` noise, and `search`/`locate` output is dropped | [run] |
+| `print` goes to stdout; `print <Theory>.` lists its contents | [run] |
+| `trivial`/`auto` never fail — an unclosed goal errors later at `qed.` ("cannot save an incomplete proof"). Closing attempts must be `by <tactic>.` | [run] |
+| `llm` mode neither reads nor writes `.eco` (its `eco` field is the *no-eco* flag): there is no caching, every call replays the file from line 1 | [run] |
+| Flags `-p NAME` (repeatable), `-timeout SEC`, `-lastgoals`, `-upto L[:C]`; default SMT timeout **3 s** → run with `EASYCRYPT_ARGS="-timeout 10"` | [src] |
 
-Budgets (defaults in the skill): N tries per goal, M total `try_snippet` calls, wall-clock per call
-from `EASYCRYPT_WALL`. HANDOFF is a designed terminal state, not a failure: proof search is
-stochastic (SMT timeouts, tactic choice) and a real user needs the agent to say precisely where it
-stopped. The demo narrative holds in either terminal state.
+## The agent loop (summary; the skill is the spec)
 
-## 5. Trace
+`check_file` → first failure → `goals_at(line)` → pick a tactic → `try_snippet` → ok: `apply_snippet`
+→ `check_file` → repeat. On failure: simpler/explicit tactic → `smt` with hints found via
+`search_lib`/`print` → split the goal → budget spent → HANDOFF. Closing attempts always `by …`.
 
-Every accepted step is one commit made by `apply_snippet`, so `git log -p` on the proof file is the
-complete, replayable agent trace independent of which client drove it. The live demo additionally
-shows the tool-call stream in Claude Code. Nothing else is logged.
+## Costs (Route A, measured in the image)
 
-## 6. Decisions
+| Call | Time |
+|---|---|
+| Load `AllCore` only | 0.5 s |
+| `elgamal.ec` up to the first lemma (`-upto 71`: imports + clones, no proofs) | 4.7 s |
+| `elgamal.ec` whole file (four lemmas, SMT included) | 5.1 s |
 
-| # | Decision | Why | Rejected |
-|---|---|---|---|
-| D1 | **Route A, file-as-state.** Server holds nothing; every call re-runs `easycrypt llm`. | Free crash recovery and parallelism; git history is the trace; same tool schema works if we ever add Route B. | Route B (child `easycrypt cli`, snapshot ids) — a session manager we don't need for the demo. |
-| D2 | **Docker on EasyCrypt's own CI image**, not opam. | Solvers pre-installed; 5–10 min build; build-time self-test. The demo machine is an Intel Mac, so the amd64 image runs natively. | opam install (20–40 min, network-fragile). Kept as documented fallback. |
-| D3 | **Strategy layer = Claude Code skill in this repo.** | Versioned, visible to judges, writable before ① exists. | MCP prompts (uneven client support); system prompt only (nothing to show). |
-| D4 | **Server owns writes: `apply_snippet` writes and commits.** | Works with any MCP client (pitch stays true); trace is guaranteed by mechanism, not by the agent remembering to commit; one audit point. Still Route A — the file is the state, the server just writes it. | Agent edits with its own editor (ties the system to Claude Code; trace depends on obedience). |
-| D5 | **Discovery = `print` via `try_snippet` + `search_lib` grep inside the container.** | `search` output is Info-level and filtered **[src]**; the stdlib lives in the container where the agent's own grep cannot see it. | Agent greps the stdlib itself (impossible across the container boundary). |
-| D6 | **③ has an explicit HANDOFF state.** | See §4. | Loop until budget, report vaguely. |
-| D7 | **Demo candidate: `examples/elgamal.ec`** — 134 lines, IND-CPA ⇔ DDH in three game hops, ends with `print conclusion.` | Smallest example that reads as crypto; exactly the §6 brief. Pending: it carries a "DiffieHellman is really out of date" warning — must check it still compiles in the image before committing to it. | Writing a new proof (brief says don't). |
+Measured on 1 vCPU, so an upper bound. The cost is almost all fixed overhead (loading the
+theories `elgamal.ec` clones); the proofs add ~0.3 s. So a `try_snippet` on this file costs ≈ 5 s
+regardless of where it is inserted, and there is no cache to exploit — Route B would only pay off
+on files whose *proofs* are expensive.
 
-## 7. Bugs queued on branch `anna` (all **[src]**-verified)
+## Status
 
-| # | Bug | Fix |
-|---|---|---|
-| B1 | `try_snippet` passes `-upto end_line`; `-upto` is exclusive, so a one-line snippet is never executed and `ok` is always the prefix's result. | `-upto end_line + 1`. |
-| B2 | `DIAG_RE` only matches `file:LINE`; real proof errors use `file: line L (c-d)`. Every failure falls into `raw_stderr` with no line number. | Second alternative in the regex; `line` = L, `col` = c. |
-| B3 | `tests/fake_easycrypt.py` implements `-upto` as *inclusive* (`lines[:upto]`), the opposite of the binary, so the smoke tests pass against the wrong semantics. | Make the fake exclusive; add a test that a one-line snippet is actually exercised. |
-| B4 | README/notes say `.eco` caches verified *prefixes*, making re-runs cheap. **[src]** `.eco` is a whole-file digest cache: if the file is byte-identical to the last successful check, `llm` exits 0 immediately — and the check is skipped entirely when `-upto` is set (`ec.ml`: `if … state.upto = None then … check_eco`). So `check_file` on an unchanged file is free; `goals_at` and `try_snippet` always replay from line 1. | Correct the claim. Cost per `try_snippet` = full check of the prefix (seconds for elgamal.ec). Acceptable for the demo; the reason to revisit Route B for large files. |
-
-## 8. Risks
-
-| Risk | Status / mitigation | Owner |
-|---|---|---|
-| `ghcr.io` pull or image build fails | Building now on Anna's Intel Mac (colima). Fallback: build `ec-build-box` from EasyCrypt's repo (~1 h). | @Anna-199 today, then @davidscode404 |
-| `DIAG_RE` still never run against the binary | First thing after the build: `llm -lastgoals` on a good and a bad file, diff stderr against §3. | @davidscode404 |
-| `elgamal.ec` no longer compiles on `main` | Check in the image; fall back to `SchnorrPK.ec` / `Pedersen.ec` (~5 KB each). | @Anna-199 |
-| SMT nondeterminism in the live demo | `-timeout 10`; pre-run the demo several times; HANDOFF state makes a partial run presentable. | @Anna-199 |
-| Local dev needs Python ≥ 3.10 (`mcp` SDK); Anna's default is 3.8 | Use Docker for the server; tests still run on 3.8. | — |
-
-## 9. Demo script (sketch)
-
-1. `easycrypt_config` — show solvers detected.
-2. Open `elgamal.ec` with one lemma's proof body replaced by `admit.` (or removed); `check_file` shows it failing with goals.
-3. Ask Claude (skill loaded) to complete the proof. Watch INSPECT → TRY → APPLY commits scroll by.
-4. `check_file` → ok. `git log --oneline` — one commit per accepted step.
-5. If it HANDOFFs: show the report; finish the step by hand; say this is the point.
+- **Done [run]:** image builds and publishes from CI; 6 tools; 10/10 real-binary tests; three
+  source-found bugs fixed (`-upto` off-by-one, error-location regex, fake binary semantics); costs measured.
+- **Open:** SKILL.md (③); the demo file with one proof blanked (④).
+- **Owners:** ①② @davidscode404 · ③④ @Anna-199. Repo rules: tests run on Python ≥ 3.8 with the
+  fake binary; real-binary tests auto-skip without `easycrypt` on PATH and run in CI.

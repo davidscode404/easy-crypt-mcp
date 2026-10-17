@@ -256,7 +256,9 @@ def theories_root() -> Path:
 
 
 def search_lib(pattern: str, limit: int = 40) -> dict:
-    """Case-insensitive regex search over the standard library. Declaration lines first.
+    """Case-insensitive regex search over the standard library's source. Declaration lines first.
+    Textual only: names produced by `clone … rename` (e.g. `dbool1E` = `dunifin1E` renamed) have
+    no declaration to find — use `print <name>.` / `print <Theory>.` through try_snippet for those.
     (EasyCrypt's own `search` command prints nothing in batch mode: its output is Info-level
     and the `llm` terminal only shows Warning and above.)"""
     if not pattern.strip():
