@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*.eco
+Try_*.ec
+.pytest_cache/
