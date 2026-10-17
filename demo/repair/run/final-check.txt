@@ -1,0 +1,13 @@
+[warning] [elgamal.ec:-1] running on OCaml 5.2.1: OCaml 5.0-5.3 have a garbage-collector regression (OCaml issue #13643) that can cause severe memory blowup in EasyCrypt; please upgrade to OCaml >= 5.4
+* In [lemmas or axioms]:
+
+lemma conclusion:
+  forall (A <: Adversary),
+    islossless A.choose =>
+    islossless A.guess =>
+    forall &m,
+      `|Pr[CPA(ElGamal, A).main() @ &m : res] - 1%r / 2%r| =
+      `|Pr[DDH0(DDHAdv(A)).main() @ &m : res] -
+        Pr[DDH1(DDHAdv(A)).main() @ &m : res]|.
+
+exit=0

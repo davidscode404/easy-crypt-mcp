@@ -1,0 +1,2 @@
+4229cc0 agent: swap{1} 7 -4.
+964861a task: line 79 deleted

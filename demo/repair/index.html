@@ -1,0 +1,625 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proof Repair</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a65; --line: #e2e0d8;
+  --ok: #2e9e5b; --ok-soft: #d7f0e0; --err: #d64545; --err-soft: #f8dcdc;
+  --try: #b98500; --try-soft: #fbefc9; --idle: #e4e2db; --accent: #2f5bd3; --accent-soft: #e3e9fb;
+  --code-bg: #f3f2ee; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9b9a93; --line: #34332f;
+    --ok: #4cc27c; --ok-soft: #1f3a2a; --err: #f06a6a; --err-soft: #432424;
+    --try: #f2bd3a; --try-soft: #3f3418; --idle: #393833; --accent: #7c9cff; --accent-soft: #232b45;
+    --code-bg: #191918; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9b9a93; --line: #34332f;
+  --ok: #4cc27c; --ok-soft: #1f3a2a; --err: #f06a6a; --err-soft: #432424;
+  --try: #f2bd3a; --try-soft: #3f3418; --idle: #393833; --accent: #7c9cff; --accent-soft: #232b45;
+  --code-bg: #191918; --shadow: none;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif; }
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 40px; }
+header h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -.01em; }
+header p { margin: 0; color: var(--muted); max-width: 820px; }
+.task { margin-top: 10px; display: inline-flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 14px; }
+.task code { background: var(--err-soft); color: var(--err); padding: 0 5px; border-radius: 4px; text-decoration: line-through; }
+
+.controls { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 12px 0; display: flex; flex-wrap: wrap;
+  gap: 8px; align-items: center; border-bottom: 1px solid var(--line); margin: 14px 0 16px; }
+button, select { font: inherit; font-size: 14px; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 92px; }
+button:disabled { opacity: .4; cursor: default; }
+.spacer { flex: 1 0 0; }
+.steps { display: flex; gap: 4px; align-items: center; flex: 1 1 260px; min-width: 0; }
+.steps .pip { flex: 1; height: 8px; border-radius: 4px; background: var(--idle); cursor: pointer; transition: background .25s; min-width: 10px; }
+.steps .pip.done.ok { background: var(--ok); } .steps .pip.done.err { background: var(--err); }
+.steps .pip.done.try { background: var(--try); } .steps .pip.done.info { background: var(--accent); }
+.steps .pip.cur { outline: 2px solid var(--ink); outline-offset: 1px; }
+.counter { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.panel > * { min-width: 0; }
+.label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); display: flex;
+  justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.label .mono { text-transform: none; letter-spacing: 0; }
+
+/* file */
+.code { background: var(--code-bg); border-radius: 8px; padding: 8px 0; font-size: 12.5px; overflow-x: auto; }
+.row { display: flex; gap: 10px; padding: 1px 10px 1px 0; white-space: pre; border-left: 4px solid transparent; min-height: 20px;
+  transition: background .3s, border-color .3s; }
+.row .n { color: var(--muted); width: 30px; text-align: right; flex: none; user-select: none; }
+.row .tag { margin-left: auto; padding-left: 12px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 11px;
+  color: var(--muted); white-space: nowrap; }
+.row.ok { border-left-color: var(--ok); } .row.idle { border-left-color: var(--idle); }
+.row.error { border-left-color: var(--err); background: var(--err-soft); }
+.row.ghost { color: var(--err); } .row.ghost .t { text-decoration: line-through; opacity: .75; }
+.row.trial { border-left-color: var(--try); background: var(--try-soft); }
+.row.added { border-left-color: var(--ok); background: var(--ok-soft); font-weight: 600; }
+.row.dim .t { color: var(--muted); }
+.filestat { display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.chip { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+.chip.ok { color: var(--ok); border-color: var(--ok); } .chip.err { color: var(--err); border-color: var(--err); }
+.chip.mono { font-size: 12px; }
+
+/* call */
+.call { border-radius: 10px; padding: 12px 14px; background: var(--code-bg); display: flex; flex-direction: column; gap: 6px;
+  border-left: 5px solid var(--idle); transition: border-color .3s, background .3s; }
+.call.ok { border-left-color: var(--ok); } .call.err { border-left-color: var(--err); background: var(--err-soft); }
+.call.try { border-left-color: var(--try); } .call.info { border-left-color: var(--accent); }
+.call .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.call .tool { font-weight: 700; font-size: 17px; }
+.call .badge { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
+.badge.ok { background: var(--ok-soft); color: var(--ok); } .badge.err { background: var(--err-soft); color: var(--err); }
+.call .time { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.call .args { font-size: 12.5px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+.call .args b { color: var(--ink); font-weight: 600; }
+.think { display: flex; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: 14.5px; }
+.think::before { content: "💭"; flex: none; }
+.think code { font-size: 13px; background: var(--panel); padding: 0 4px; border-radius: 4px; }
+.diag { font-size: 13px; color: var(--err); font-weight: 600; }
+.diag:empty { display: none; }
+
+/* goal */
+.goalbox { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; overflow-x: auto; }
+.goalbox pre { margin: 0; white-space: pre; }
+.goalbox .empty { color: var(--muted); font-style: italic; font-family: inherit; }
+table.prog { border-collapse: collapse; margin: 8px 0; width: 100%; }
+table.prog th { font-weight: 600; font-size: 11px; color: var(--muted); text-align: left; padding: 2px 8px; text-transform: uppercase; letter-spacing: .05em; }
+table.prog td { padding: 2px 8px; white-space: pre; border-radius: 4px; transition: background .3s; }
+table.prog td.k { color: var(--muted); text-align: center; width: 32px; }
+table.prog td.bad { background: var(--err-soft); color: var(--err); font-weight: 600; }
+table.prog td.moved { background: var(--ok-soft); color: var(--ok); font-weight: 600; }
+table.prog td.pair { background: var(--accent-soft); }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px;
+  vertical-align: -1px; background: var(--c); }
+
+/* log + final */
+.log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13.5px; }
+.log li { display: flex; gap: 10px; padding: 5px 8px; border-radius: 6px; align-items: baseline; cursor: pointer; }
+.log li.future { opacity: .35; } .log li.cur { background: var(--code-bg); }
+.log .ts { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; width: 44px; flex: none; }
+.log .tx { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log .tx code { font-size: 12px; color: var(--muted); }
+.final { display: none; border-radius: 12px; padding: 18px; background: var(--ok-soft); border: 1px solid var(--ok); margin-top: 16px; }
+.final.show { display: block; animation: pop .4s ease-out; }
+@keyframes pop { from { transform: scale(.98); opacity: 0; } to { transform: none; opacity: 1; } }
+.final h2 { margin: 0 0 6px; color: var(--ok); font-size: 21px; }
+.final p { margin: 4px 0; }
+.final pre { background: var(--panel); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; overflow-x: auto; margin: 10px 0 0; }
+.cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+@media (max-width: 640px) { .cmp { grid-template-columns: minmax(0, 1fr); } }
+.cmp > div { min-width: 0; overflow-x: auto; } .cmp div { background: var(--panel); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.cmp b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.cmp pre { margin: 0; padding: 0; background: none; font-size: 12px; }
+footer { margin-top: 20px; color: var(--muted); font-size: 12.5px; }
+footer code { font-size: 12px; }
+
+/* live mode */
+.modeswitch { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.modeswitch button { border: 0; border-radius: 0; }
+.modeswitch button.on { background: var(--ink); color: var(--bg); }
+.hint { font-size: 14px; color: var(--muted); }
+.hint b { color: var(--ink); }
+.code.full { max-height: 70vh; overflow: auto; }
+.row.pick { cursor: pointer; }
+.row.pick:hover { background: var(--err-soft); }
+.row.pick:not(.sel):hover .tag::after { content: "✂"; }
+.row.sel { background: var(--err-soft); border-left-color: var(--err); }
+.row.sel .t { text-decoration: line-through; color: var(--err); }
+.row.nopick .t { color: var(--muted); }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -1px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } .final.show { animation: none; } }
+.call.run { border-left-color: var(--accent); }
+.badge.run { background: var(--accent-soft); color: var(--accent); }
+.goalbox.stale { opacity: .45; }
+.think.live span::after { content: "▍"; animation: blink 1s steps(2) infinite; color: var(--accent); }
+@keyframes blink { 50% { opacity: 0; } }
+.alert { border-radius: 10px; padding: 10px 14px; background: var(--err-soft); color: var(--err); font-size: 14px; margin-bottom: 12px; display: none; }
+.alert.show { display: block; }
+.alert code { font-size: 13px; }
+.final.fail { background: var(--err-soft); border-color: var(--err); }
+.final.fail h2 { color: var(--err); }
+details.agentlog { margin-top: 12px; font-size: 12.5px; color: var(--muted); }
+details.agentlog pre { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; background: var(--code-bg); padding: 8px; border-radius: 8px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 data-i="title"></h1>
+    <p data-i="subtitle"></p>
+    <div class="task" id="taskchip"></div>
+  </header>
+
+  <div class="controls">
+    <span class="modeswitch" id="modeswitch" hidden>
+      <button id="mLive" data-i="mLive"></button><button id="mReplay" data-i="mReplay"></button>
+    </span>
+    <!-- live: setup -->
+    <span class="hint" id="pickHint" hidden></span>
+    <button class="primary" id="go" hidden></button>
+    <!-- live: running -->
+    <span class="hint" id="runStatus" hidden></span>
+    <button id="stop" data-i="stop" hidden></button>
+    <button id="again" data-i="again" hidden></button>
+    <!-- replay -->
+    <button class="primary" id="play" hidden></button>
+    <select id="speed" aria-label="speed" hidden><option value="1">1×</option><option value="2" selected>2×</option><option value="4">4×</option></select>
+    <!-- browsing steps (replay + live) -->
+    <button id="prev" aria-label="previous">◀</button>
+    <button id="next" aria-label="next">▶</button>
+    <div class="steps" id="pips"></div>
+    <span class="counter" id="counter"></span>
+    <button id="lang">中文</button>
+  </div>
+
+  <div class="alert" id="alert"></div>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="label"><span data-i="fileLabel"></span><span class="mono" id="filename"></span></div>
+      <div class="code mono" id="code"></div>
+      <div class="filestat" id="filestat"></div>
+    </section>
+
+    <section class="panel">
+      <div class="label"><span data-i="callLabel"></span><span id="clock" class="mono"></span></div>
+      <div class="call" id="call"></div>
+      <div class="think" id="think"></div>
+      <div>
+        <div class="label" style="margin-bottom:6px"><span data-i="goalLabel"></span><span id="goalwhere" class="mono"></span></div>
+        <div class="goalbox mono" id="goal"></div>
+        <div class="legend" id="legend" style="margin-top:8px">
+          <span style="--c:var(--err-soft)" data-i="lBad"></span><span style="--c:var(--ok-soft)" data-i="lMoved"></span><span style="--c:var(--accent-soft)" data-i="lPair"></span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="final" id="final">
+    <h2 id="finalTitle"></h2>
+    <p id="finalBody"></p>
+    <div class="cmp">
+      <div><b id="cmpOrigH"></b><pre class="mono" id="cmpOrig"></pre></div>
+      <div><b id="cmpAgentH"></b><pre class="mono" id="cmpAgent"></pre></div>
+    </div>
+    <pre class="mono" id="finalOut"></pre>
+  </div>
+
+  <section class="panel" style="margin-top:16px">
+    <div class="label"><span data-i="logLabel"></span></div>
+    <ul class="log" id="log"></ul>
+    <details class="agentlog" id="agentlog" hidden><summary data-i="agentLog"></summary><pre id="agentlogText"></pre></details>
+  </section>
+
+  <footer id="footer"></footer>
+</div>
+
+<script src="trace.js"></script>
+<script>
+const I18N = {
+  en: {
+    title: "Repairing a broken EasyCrypt proof, step by step",
+    subtitle: "Delete any line inside a proof of the ElGamal IND-CPA file. An agent then repairs it using only the EasyCrypt MCP tools: errors, proof goals, trial checks. Every result on this page is real EasyCrypt output.",
+    mLive: "Live", mReplay: "Recorded run",
+    pick: "Click a line inside a proof to delete it.", picked: l => `Delete line <b>${l}</b> and let the agent repair it.`,
+    go: l => l ? `✂ Delete line ${l} & repair` : "✂ Delete & repair",
+    stop: "Stop", again: "↺ New run",
+    running: "<span class=\"spin\"></span> agent working…", runDone: "finished", stopped: "stopped",
+    play: "▶ Play", pause: "❚❚ Pause", replay: "↺ Replay", lang: "中文",
+    fileLabel: "Proof file", callLabel: "Tool call", goalLabel: "What EasyCrypt shows",
+    lBad: "can't be matched", lMoved: "moved by the agent", lPair: "now lined up",
+    logLabel: "All tool calls", agentLog: "Agent log",
+    startReplay: "Press Play. The file is the broken one the agent starts from.", startLive: "Waiting for the agent's first move…",
+    setupCall: "Pick a line in the file on the left.", notStarted: "Not started.",
+    taskReplay: (l, t) => `Recorded task: demo/elgamal.ec with line ${l} <code>${t}</code> deleted → make it check again.`,
+    taskLive: (l, t) => `Live task: line ${l} <code>${t}</code> deleted → make it check again.`,
+    taskSetup: n => `Live: ${n}. Choose the line to delete.`,
+    deletedTag: "deleted", trialTag: "trial · temp copy only", addedTag: "written by agent", errTag: "fails here",
+    sChecked: n => `${n} lines checked`, sErr: l => `error at line ${l}`, sOk: "whole file accepted", sUnchanged: "file unchanged",
+    sCommit: c => `commit ${c}`, noGoal: "(no goal: nothing open)", ok: "ok", fail: "fails", run: "running",
+    at: (t, d) => `t = ${t.toFixed(1)} s` + (d != null ? ` · EasyCrypt ${d.toFixed(2)} s` : ""),
+    left: "left program", right: "right program",
+    goalBefore: l => `goal before line ${l}`, goalAfter: "goal after the snippet", goalFail: "remaining goal at the failure",
+    okTitle: "✓ EasyCrypt accepts the proof — exit 0", failTitle: "✗ The file still does not check",
+    okBody: n => `${n} tool calls. The verdict is EasyCrypt's own check of the final file, not the agent's claim.`,
+    replayBody: "7 tool calls, about one minute, one line written. The agent did not restore the deleted line; it derived a different, equally valid step from the goals.",
+    cmpOrig: l => `Deleted (line ${l})`, cmpAgent: "Written by the agent",
+    nothingAdded: "(nothing)",
+    loginHelp: "The agent could not start: Claude Code is not logged in on this machine. In a terminal run <code>claude</code>, then <code>/login</code>, then retry (or start the server with ANTHROPIC_API_KEY set).",
+    noAgent: "The agent could not start: the <code>claude</code> CLI was not found. Start the server with <code>--claude /path/to/claude</code> or set CLAUDE_BIN.",
+    footerReplay: "Recorded data: demo/repair/run/. For the live mode, start: .venv/bin/python demo/repair/live_server.py",
+    footerLive: a => `Live backend: demo/repair/live_server.py · agent: ${a}`,
+  },
+  zh: {
+    title: "一步步修复被破坏的 EasyCrypt 证明",
+    subtitle: "在 ElGamal IND-CPA 证明文件里任选一行证明代码删除，智能体只用 EasyCrypt MCP 工具（错误信息、证明目标、试运行）把它修好。页面上的每个结果都是真实的 EasyCrypt 输出。",
+    mLive: "现场", mReplay: "录制回放",
+    pick: "点击证明内的一行来删除它。", picked: l => `删除第 <b>${l}</b> 行，让智能体修复。`,
+    go: l => l ? `✂ 删除第 ${l} 行并修复` : "✂ 删除并修复",
+    stop: "停止", again: "↺ 再来一次",
+    running: "<span class=\"spin\"></span> 智能体工作中…", runDone: "已结束", stopped: "已停止",
+    play: "▶ 播放", pause: "❚❚ 暂停", replay: "↺ 重播", lang: "English",
+    fileLabel: "证明文件", callLabel: "工具调用", goalLabel: "EasyCrypt 显示的内容",
+    lBad: "无法匹配", lMoved: "智能体移动的语句", lPair: "已对齐",
+    logLabel: "全部工具调用", agentLog: "智能体日志",
+    startReplay: "点击播放。文件是智能体拿到的被破坏版本。", startLive: "等待智能体的第一步…",
+    setupCall: "在左侧文件中选择一行。", notStarted: "尚未开始。",
+    taskReplay: (l, t) => `录制任务：demo/elgamal.ec 删除第 ${l} 行 <code>${t}</code> → 让它重新通过。`,
+    taskLive: (l, t) => `现场任务：删除第 ${l} 行 <code>${t}</code> → 让它重新通过。`,
+    taskSetup: n => `现场：${n}。选择要删除的行。`,
+    deletedTag: "已删除", trialTag: "试运行 · 仅临时副本", addedTag: "智能体写入", errTag: "在此失败",
+    sChecked: n => `已检查 ${n} 行`, sErr: l => `第 ${l} 行出错`, sOk: "整个文件通过", sUnchanged: "文件未改动",
+    sCommit: c => `提交 ${c}`, noGoal: "（没有待证目标）", ok: "通过", fail: "失败", run: "运行中",
+    at: (t, d) => `t = ${t.toFixed(1)} 秒` + (d != null ? ` · EasyCrypt ${d.toFixed(2)} 秒` : ""),
+    left: "左程序", right: "右程序",
+    goalBefore: l => `第 ${l} 行之前的目标`, goalAfter: "片段执行后的目标", goalFail: "失败处剩余目标",
+    okTitle: "✓ EasyCrypt 接受证明 — 退出码 0", failTitle: "✗ 文件仍未通过检查",
+    okBody: n => `共 ${n} 次工具调用。结论来自 EasyCrypt 对最终文件的检查，而不是智能体的自述。`,
+    replayBody: "7 次工具调用，约一分钟，写入一行。智能体没有恢复被删的那行，而是从目标推导出一个不同但同样正确的步骤。",
+    cmpOrig: l => `被删除的（第 ${l} 行）`, cmpAgent: "智能体写入的",
+    nothingAdded: "（无）",
+    loginHelp: "智能体无法启动：本机的 Claude Code 未登录。请在终端运行 <code>claude</code>，再输入 <code>/login</code>，然后重试（或设置 ANTHROPIC_API_KEY 后启动服务器）。",
+    noAgent: "智能体无法启动：找不到 <code>claude</code> 命令行。启动服务器时加 <code>--claude /path/to/claude</code> 或设置 CLAUDE_BIN。",
+    footerReplay: "录制数据：demo/repair/run/。现场模式请启动：.venv/bin/python demo/repair/live_server.py",
+    footerLive: a => `现场后端：demo/repair/live_server.py · 智能体：${a}`,
+  },
+};
+let lang = "en";
+const T = () => I18N[lang];
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const md = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+const base = p => String(p).split("/").pop();
+
+// Recorded run: goal rows to colour (by row number in EasyCrypt's two-column listing).
+const BAD = { L: { bad: [7] }, R: { bad: [7] } }, LINED = { L: { moved: [3], pair: [4, 5] }, R: { moved: [2], pair: [6, 7] } };
+const REC_HL = { 1: BAD, 2: BAD, 3: BAD, 4: LINED, 5: LINED };
+
+// ---------------- state ----------------
+const st = {
+  mode: "replay",          // replay | setup | live
+  server: null,            // /api/status when the live backend is up
+  proof: null,             // {name, text, deletable}
+  pick: null,              // selected line in setup
+  name: "elgamal.ec", task: "", deleted: null,
+  steps: [], pending: null, noteBuf: [], final: null, logs: [],
+  cur: -1, follow: true, running: false, stopped: false, sid: null, es: null,
+};
+let timer = null;
+
+function loadReplay() {
+  const D = window.REPAIR;
+  Object.assign(st, { mode: "replay", name: "elgamal.ec", task: D.task, deleted: D.deleted,
+    steps: D.steps.map((s, i) => ({ ...s, hl: REC_HL[i] })), pending: null, noteBuf: [], logs: [],
+    final: { ok: D.final.exit === 0, out: "$ easycrypt llm -lastgoals elgamal.ec   # exit " + D.final.exit + "\n\n" + D.final.out, recorded: true },
+    cur: -1, follow: false, running: false });
+}
+
+// ---------------- helpers ----------------
+const kind = s => !s ? "" : s.tool === "easycrypt_config" || s.tool === "search_lib" ? "info" : !s.result.ok ? "err"
+  : s.tool === "try_snippet" ? "try" : "ok";
+const firstErr = s => (s.result.diagnostics || []).find(d => d.severity === "critical");
+const lastIdx = () => st.steps.length - 1;
+// in live mode, "following" means: show the newest step, plus the call that is running now
+const showingPending = () => st.mode === "live" && st.follow && (st.pending || (st.running && st.noteBuf.length));
+
+/** File as it stands after step `upto`: lines, which lines the agent added, where the deleted line was. */
+function fileAt(upto) {
+  let lines = st.task.split("\n"), added = [], ghost = st.deleted ? st.deleted.line : null, commit = "";
+  for (let i = 0; i <= upto; i++) {
+    const x = st.steps[i];
+    if (x.tool !== "apply_snippet" || !x.result.ok) continue;
+    const ins = x.args.snippet.replace(/\n+$/, "").split("\n");
+    const at = x.args.line || lines.length + 1;
+    lines.splice(at - 1, 0, ...ins);
+    added = added.map(a => a >= at ? a + ins.length : a).concat(ins.map((_, k) => at + k));
+    if (ghost != null && at < ghost) ghost += ins.length;
+    commit = x.result.commit || commit;
+  }
+  return { lines, added, ghost, commit };
+}
+
+function fileView() {
+  const code = $("code");
+  if (st.mode === "setup") {
+    const lines = st.proof.text.split("\n"), ok = new Set(st.proof.deletable);
+    code.className = "code mono full";
+    code.innerHTML = lines.map((t, i) => {
+      const n = i + 1, can = ok.has(n);
+      return `<div class="row ${can ? "pick" : "nopick"} ${st.pick === n ? "sel" : ""}" ${can ? `data-line="${n}"` : ""}><span class="n">${n}</span><span class="t">${esc(t)}</span><span class="tag">${st.pick === n ? T().deletedTag : ""}</span></div>`;
+    }).join("");
+    $("filestat").innerHTML = "";
+    const first = !st.pick && code.querySelector(`[data-line="${st.proof.deletable[0]}"]`);
+    if (first) code.scrollTop = first.offsetTop - code.offsetTop - 120;  // open at the first proof
+    return;
+  }
+  code.className = "code mono";
+  const view = showingPending() ? lastIdx() : st.cur;
+  const s = showingPending() ? st.pending : st.steps[st.cur];
+  const { lines, added, ghost, commit } = fileAt(view);
+  let checkedTo = 0, errLine = null, accepted = false;
+  for (let i = 0; i <= view; i++) {
+    const x = st.steps[i];
+    if (x.tool === "check_file") { const e = firstErr(x); errLine = e ? e.line : null;
+      checkedTo = e ? e.line - 1 : lines.length - (lines.at(-1) === "" ? 1 : 0); accepted = x.result.ok; }
+    if (x.tool === "apply_snippet" && x.result.ok) { errLine = null; checkedTo = Math.max(...added); accepted = false; }
+  }
+  const trial = s && s.tool === "try_snippet" ? s.args : null;
+  // window: the lemma around the deleted line, widened to whatever is being touched
+  const g = ghost || 1;
+  let lo = g, hi = g;
+  while (lo > 1 && !/^\s*(local\s+)?(lemma|equiv|hoare|phoare)\b/.test(lines[lo - 1])) lo--;
+  while (hi < lines.length && !/^\s*qed\./.test(lines[hi - 1])) hi++;
+  for (const n of [errLine, trial && trial.line, ...added]) if (n) { lo = Math.min(lo, n - 2); hi = Math.max(hi, n + 1); }
+  lo = Math.max(1, lo - 4); hi = Math.min(lines.length, hi + 2);
+  const rows = [], row = (n, txt, cls, tag) => rows.push(`<div class="row ${cls}"><span class="n">${n}</span><span class="t">${esc(txt)}</span>${tag ? `<span class="tag">${tag}</span>` : ""}</div>`);
+  for (let n = lo; n <= hi; n++) {
+    if (n === ghost) row("−", st.deleted.text, "ghost", T().deletedTag);
+    if (trial && n === (trial.line || lines.length + 1)) trial.snippet.replace(/\n+$/, "").split("\n").forEach(t => row("+", t, "trial", T().trialTag));
+    let cls = checkedTo === 0 && errLine === null ? "" : n === errLine ? "error" : n <= checkedTo ? "ok" : "idle";
+    let tag = n === errLine ? T().errTag : "";
+    if (added.includes(n)) { cls += " added"; tag = T().addedTag; }
+    row(n, lines[n - 1] ?? "", cls, tag);
+  }
+  code.innerHTML = rows.join("");
+  const chips = [];
+  if (checkedTo || errLine) {
+    if (errLine) chips.push(`<span class="chip err">${T().sErr(errLine)}</span>`);
+    else if (accepted) chips.push(`<span class="chip ok">${T().sOk}</span>`);
+    chips.push(`<span class="chip">${T().sChecked(Math.max(checkedTo, 0))}</span>`);
+  }
+  if (s && s.tool === "try_snippet") chips.push(`<span class="chip">${T().sUnchanged}</span>`);
+  if (commit) chips.push(`<span class="chip mono ok">${T().sCommit(commit)}</span>`);
+  $("filestat").innerHTML = chips.join("");
+}
+
+function renderGoal(text, hl) {
+  if (!text) return `<span class="empty">${T().noGoal}</span>`;
+  const progRe = /^(.*?)\s+\((\d+)\)\s+(.*?)\s*$/;
+  const out = []; let table = null;
+  const flush = () => { if (table) { out.push(`<table class="prog"><tr><th>${T().left}</th><th></th><th>${T().right}</th></tr>${table.join("")}</table>`); table = null; } };
+  for (const l of text.split("\n")) {
+    const m = l.match(progRe);
+    if (m && !/^\s*(pre|post)\b/.test(l)) {
+      const k = +m[2];
+      const cls = side => ["bad", "moved", "pair"].find(c => (hl?.[side]?.[c] || []).includes(k)) || "";
+      (table ||= []).push(`<tr><td class="${cls("L")}">${esc(m[1].trimEnd())}</td><td class="k">${k}</td><td class="${cls("R")}">${esc(m[3])}</td></tr>`);
+    } else { flush(); out.push(`<pre>${esc(l)}</pre>`); }
+  }
+  flush();
+  return out.join("");
+}
+
+function callView() {
+  const tr = T(), call = $("call"), think = $("think"), goal = $("goal");
+  think.className = "think"; goal.classList.remove("stale");
+  if (st.mode === "setup") {
+    call.className = "call"; call.innerHTML = `<div class="head"><span class="tool">—</span></div><div class="args">${esc(tr.setupCall)}</div>`;
+    think.innerHTML = `<span>${esc(tr.notStarted)}</span>`; goal.innerHTML = `<span class="empty">${tr.noGoal}</span>`;
+    $("goalwhere").textContent = $("clock").textContent = ""; return;
+  }
+  const pend = showingPending();
+  const s = pend ? st.pending || st.steps[lastIdx()] : st.steps[st.cur];
+  const argsHtml = a => Object.entries(a).map(([k, v]) => `${k}: <b>${esc(k === "path" ? base(v) : typeof v === "string" ? v.trim() : v)}</b>`).join("   ");
+  if (!s) {
+    call.className = "call"; call.innerHTML = `<div class="head"><span class="tool">—</span></div><div class="args">${esc(st.mode === "live" ? tr.startLive : tr.startReplay)}</div>`;
+    const live = pend && st.noteBuf.length;
+    think.className = "think" + (live ? " live" : "");
+    think.innerHTML = `<span>${live ? md(st.noteBuf.join("\n")) : esc(tr.notStarted)}</span>`;
+    goal.innerHTML = `<span class="empty">${tr.noGoal}</span>`; $("goalwhere").textContent = $("clock").textContent = ""; return;
+  }
+  if (pend && !st.pending) { // agent is writing, no call yet: keep the last step, show the new prose
+    think.className = "think live"; think.innerHTML = `<span>${md(st.noteBuf.join("\n"))}</span>`;
+  }
+  const running = pend && st.pending;
+  const shown = running ? st.pending : st.steps[pend ? lastIdx() : st.cur];
+  const ok = running ? null : shown.result.ok, e = running ? null : firstErr(shown);
+  call.className = "call " + (running ? "run" : kind(shown));
+  call.innerHTML = `<div class="head"><span class="tool mono">${esc(shown.tool)}</span><span class="badge ${running ? "run" : ok ? "ok" : "err"}">${running ? `<span class="spin"></span> ${tr.run}` : ok ? tr.ok : tr.fail}</span></div>
+    <div class="args mono">${argsHtml(shown.args) || "&nbsp;"}</div>
+    <div class="diag">${e ? esc(`line ${e.line}: ${e.message}`) : shown.result?.error ? esc(shown.result.error) : ""}</div>`;
+  if (!(pend && !st.pending)) {
+    const note = typeof shown.note === "string" ? shown.note : shown.note?.[lang] || "";
+    think.innerHTML = `<span>${note ? md(note) : "—"}</span>`;
+  }
+  $("clock").textContent = tr.at(shown.t, running ? null : shown.dur);
+  // goals: the running call has none yet, so keep the previous step's goals, dimmed
+  const gs = running ? st.steps[lastIdx()] : shown;
+  if (!gs) { goal.innerHTML = `<span class="empty">${tr.noGoal}</span>`; $("goalwhere").textContent = ""; return; }
+  goal.classList.toggle("stale", !!running);
+  goal.innerHTML = gs.tool === "easycrypt_config" ? `<pre>${esc((gs.result.output || "").split("\n").filter(l => /git-hash|Known provers|timeout/.test(l)).join("\n"))}</pre>`
+    : gs.tool === "search_lib" ? `<pre>${esc(JSON.stringify(gs.result, null, 1).slice(0, 2000))}</pre>`
+    : renderGoal(gs.result.goals || "", gs.hl);
+  $("goalwhere").textContent = gs.tool === "goals_at" ? tr.goalBefore(gs.args.line) : gs.tool.endsWith("_snippet") ? tr.goalAfter : gs.result.ok === false ? tr.goalFail : "";
+}
+
+function render() {
+  const tr = T(), live = st.mode === "live", setup = st.mode === "setup", replay = st.mode === "replay";
+  // controls
+  $("modeswitch").hidden = !st.server;
+  $("mLive").classList.toggle("on", !replay); $("mReplay").classList.toggle("on", replay);
+  $("pickHint").hidden = !setup; $("go").hidden = !setup;
+  $("pickHint").innerHTML = st.pick ? tr.picked(st.pick) : esc(tr.pick);
+  $("go").textContent = tr.go(st.pick); $("go").disabled = !st.pick;
+  $("runStatus").hidden = !live; $("stop").hidden = !(live && st.running); $("again").hidden = !(live && !st.running);
+  $("runStatus").innerHTML = st.running ? tr.running : st.stopped ? tr.stopped : tr.runDone;
+  $("play").hidden = $("speed").hidden = !replay;
+  $("play").textContent = timer ? tr.pause : st.cur >= lastIdx() ? tr.replay : tr.play;
+  for (const id of ["prev", "next", "pips", "counter"]) $(id).hidden = setup;
+  const view = showingPending() ? lastIdx() + 1 : st.cur;
+  $("prev").disabled = st.cur < 0; $("next").disabled = st.cur >= lastIdx() && !showingPending();
+  $("pips").innerHTML = st.steps.map((x, i) =>
+    `<span class="pip ${i <= st.cur || live ? "done " + kind(x) : ""} ${i === view ? "cur" : ""}" data-i="${i}" title="${esc(x.tool)}"></span>`).join("")
+    + (live && st.pending ? `<span class="pip ${view === lastIdx() + 1 ? "cur" : ""}" style="background:var(--accent);opacity:.5"></span>` : "");
+  $("counter").textContent = `${Math.min(view + 1, st.steps.length + (st.pending ? 1 : 0))} / ${st.steps.length + (st.pending ? 1 : 0)}`;
+  // header chip
+  $("taskchip").innerHTML = setup ? esc(tr.taskSetup(st.proof.name))
+    : (replay ? tr.taskReplay : tr.taskLive)(st.deleted.line, esc(st.deleted.text.trim()));
+  $("filename").textContent = setup ? st.proof.name : st.name;
+  $("legend").hidden = !replay;
+  $("footer").textContent = st.server && !replay ? tr.footerLive(st.server.agent) : tr.footerReplay;
+
+  fileView(); callView();
+
+  // log
+  $("log").innerHTML = setup ? "" : st.steps.map((x, i) => {
+    const sn = x.args.snippet ? ` <code>${esc(x.args.snippet.trim())}</code>` : x.args.line ? ` <code>line ${x.args.line}</code>` : x.args.pattern ? ` <code>${esc(x.args.pattern)}</code>` : "";
+    return `<li class="${replay && i > st.cur ? "future" : ""} ${i === st.cur && !showingPending() ? "cur" : ""}" data-i="${i}"><span class="ts">${x.t.toFixed(1)}s</span><span class="tx mono">${esc(x.tool)}${sn}</span><span>${!replay || i <= st.cur ? (x.result.ok ? "✓" : "✗") : ""}</span></li>`;
+  }).join("") + (live && st.pending ? `<li class="${showingPending() ? "cur" : ""}"><span class="ts">${st.pending.t.toFixed(1)}s</span><span class="tx mono">${esc(st.pending.tool)}${st.pending.args.snippet ? ` <code>${esc(st.pending.args.snippet.trim())}</code>` : ""}</span><span class="spin"></span></li>` : "");
+  $("agentlog").hidden = !(live && st.logs.length); $("agentlogText").textContent = st.logs.join("\n");
+  const needLogin = live && st.logs.some(l => /not logged in|\/login|invalid api key|authentication/i.test(l));
+  const noAgent = live && st.logs.some(l => /could not start agent/.test(l));
+  $("alert").classList.toggle("show", needLogin || noAgent);
+  $("alert").innerHTML = needLogin ? tr.loginHelp : noAgent ? tr.noAgent : "";
+
+  finalView();
+}
+
+function finalView() {
+  const f = st.final, tr = T(), el = $("final");
+  const show = f && (st.mode === "live" ? !st.running : st.cur === lastIdx());
+  el.classList.toggle("show", !!show); el.classList.toggle("fail", !!(f && !f.ok));
+  if (!show) return;
+  $("finalTitle").textContent = f.ok ? tr.okTitle : tr.failTitle;
+  $("finalBody").textContent = f.recorded ? tr.replayBody : (f.ok ? tr.okBody(st.steps.length) : "") + (f.summary ? " " + f.summary : "");
+  const { lines, added } = fileAt(lastIdx());
+  $("cmpOrigH").textContent = tr.cmpOrig(st.deleted.line);
+  $("cmpOrig").textContent = st.deleted.text.trim();
+  $("cmpAgentH").textContent = tr.cmpAgent;
+  $("cmpAgent").textContent = added.length ? added.map(n => `${n}: ${lines[n - 1].trim()}`).join("\n") : tr.nothingAdded;
+  $("finalOut").textContent = f.out;
+}
+
+function applyI18n() {
+  const tr = T();
+  document.documentElement.lang = lang === "zh" ? "zh" : "en";
+  document.querySelectorAll("[data-i]").forEach(el => { const v = tr[el.dataset.i]; if (typeof v === "string") el.textContent = v; });
+  $("lang").textContent = tr.lang;
+}
+
+// ---------------- navigation ----------------
+function go(i) {
+  st.cur = Math.max(-1, Math.min(lastIdx(), i));
+  st.follow = st.mode === "live" && st.cur === lastIdx();
+  render();
+  if ($("final").classList.contains("show") && st.mode === "replay") setTimeout(() => $("final").scrollIntoView({ behavior: "smooth", block: "nearest" }), 150);
+}
+function stopTimer() { clearTimeout(timer); timer = null; }
+function tick() {
+  if (st.cur >= lastIdx()) { stopTimer(); return render(); }
+  go(st.cur + 1);
+  timer = setTimeout(tick, (st.steps[st.cur].tool === "easycrypt_config" ? 1800 : 4200) / +$("speed").value);
+  render();
+}
+$("play").onclick = () => {
+  if (timer) { stopTimer(); return render(); }
+  if (st.cur >= lastIdx()) st.cur = -1;
+  timer = setTimeout(tick, 200); render();
+};
+$("next").onclick = () => { stopTimer(); if (st.cur >= lastIdx() && st.mode === "live") { st.follow = true; render(); } else go(st.cur + 1); };
+$("prev").onclick = () => { stopTimer(); if (showingPending()) { st.follow = false; st.cur = lastIdx(); render(); } else go(st.cur - 1); };
+$("pips").onclick = e => { const i = e.target.dataset.i; if (i != null) { stopTimer(); go(+i); } };
+$("log").onclick = e => { const li = e.target.closest("li[data-i]"); if (li) { stopTimer(); go(+li.dataset.i); } };
+$("lang").onclick = () => { lang = lang === "en" ? "zh" : "en"; applyI18n(); render(); };
+document.addEventListener("keydown", e => {
+  if (["SELECT", "INPUT"].includes(e.target.tagName) || st.mode === "setup") return;
+  if (e.key === "ArrowRight") $("next").click(); else if (e.key === "ArrowLeft") $("prev").click();
+  else if (e.key === " " && st.mode === "replay") { e.preventDefault(); $("play").click(); }
+});
+
+// ---------------- live mode ----------------
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+}
+function enterSetup() {
+  stopTimer(); st.es?.close();
+  Object.assign(st, { mode: "setup", steps: [], pending: null, noteBuf: [], final: null, logs: [], cur: -1, running: false, stopped: false });
+  render();
+}
+$("code").onclick = e => {
+  if (st.mode !== "setup") return;
+  const r = e.target.closest("[data-line]"); if (!r) return;
+  st.pick = +r.dataset.line === st.pick ? null : +r.dataset.line; render();
+};
+$("mLive").onclick = () => { if (st.mode === "replay") enterSetup(); };
+$("mReplay").onclick = () => { if (st.mode !== "replay") { st.es?.close(); loadReplay(); render(); } };
+$("again").onclick = enterSetup;
+$("stop").onclick = () => { st.stopped = true; api(`/api/sessions/${st.sid}/stop`, {}).catch(() => {}); };
+$("go").onclick = async () => {
+  if (!st.pick) return;
+  $("go").disabled = true;
+  let s;
+  try { s = await api("/api/sessions", { line: st.pick, lang }); }
+  catch (err) { st.logs = [String(err)]; $("go").disabled = false; return; }
+  Object.assign(st, { mode: "live", sid: s.id, name: st.proof.name, task: s.task, deleted: s.deleted,
+    steps: [], pending: null, noteBuf: [], final: null, logs: [], cur: -1, follow: true, running: true, stopped: false });
+  render();
+  const es = st.es = new EventSource(`/api/sessions/${s.id}/events`);
+  const on = (k, f) => es.addEventListener(k, ev => { f(JSON.parse(ev.data)); if (st.follow) st.cur = lastIdx(); render(); });
+  on("note", d => st.noteBuf.push(d.text));
+  on("call", d => { st.pending = { ...d, note: st.noteBuf.join("\n"), result: {} }; st.noteBuf = []; });
+  on("step", d => { st.steps.push(d); st.pending = null; });
+  on("log", d => st.logs.push(d.text));
+  on("done", d => {
+    es.close(); st.running = false; st.pending = null; st.noteBuf = [];
+    const diag = (d.diagnostics || []).map(x => `[${x.severity}] line ${x.line}: ${x.message}`).join("\n");
+    st.final = { ok: d.ok, summary: d.summary, out: `$ easycrypt llm -lastgoals ${st.name}   # exit ${d.exit_code}` + (diag ? "\n\n" + diag : "") };
+    if (st.follow) { st.cur = lastIdx(); setTimeout(() => $("final").scrollIntoView({ behavior: "smooth", block: "nearest" }), 150); }
+  });
+  es.onerror = () => { if (st.running && es.readyState === EventSource.CLOSED) { st.running = false; render(); } };
+};
+
+// ---------------- boot ----------------
+loadReplay(); applyI18n(); render();
+(async () => {
+  try {
+    st.server = await api("/api/status");
+    st.proof = await api("/api/proof");
+    enterSetup();
+  } catch { /* static hosting: recorded run only */ }
+})();
+</script>
+</body>
+</html>

@@ -3,3 +3,5 @@ __pycache__/
 *.eco
 Try_*.ec
 .pytest_cache/
+.venv/
+demo/repair/sessions/

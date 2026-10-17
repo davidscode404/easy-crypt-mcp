@@ -1,0 +1,41 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "replay",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8765",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "demo/replay"
+      ],
+      "port": 8765
+    },
+    {
+      "name": "repair-live",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": [
+        "demo/repair/live_server.py",
+        "--port",
+        "8766"
+      ],
+      "port": 8766
+    },
+    {
+      "name": "repair-rehearse",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": [
+        "demo/repair/live_server.py",
+        "--agent",
+        "replay",
+        "--port",
+        "8767"
+      ],
+      "port": 8767
+    }
+  ]
+}

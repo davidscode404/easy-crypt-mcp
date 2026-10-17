@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proof Replay</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a65; --line: #e2e0d8;
+  --ok: #2e9e5b; --ok-soft: #d7f0e0; --err: #d64545; --err-soft: #f8dcdc;
+  --try: #e0a100; --try-soft: #fbefc9; --idle: #e4e2db; --hole: transparent; --hole-edge: #a9a69c;
+  --accent: #2f5bd3; --code-bg: #f3f2ee; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 2px 8px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9b9a93; --line: #34332f;
+    --ok: #4cc27c; --ok-soft: #1f3a2a; --err: #f06a6a; --err-soft: #432424;
+    --try: #f2bd3a; --try-soft: #3f3418; --idle: #393833; --hole-edge: #75736b;
+    --accent: #7c9cff; --code-bg: #191918; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9b9a93; --line: #34332f;
+  --ok: #4cc27c; --ok-soft: #1f3a2a; --err: #f06a6a; --err-soft: #432424;
+  --try: #f2bd3a; --try-soft: #3f3418; --idle: #393833; --hole-edge: #75736b;
+  --accent: #7c9cff; --code-bg: #191918; --shadow: none;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif; }
+code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 40px; }
+header h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -.01em; }
+header p { margin: 0; color: var(--muted); }
+.task { margin-top: 10px; display: inline-block; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 10px; font-size: 14px; }
+.mockflag { color: var(--try); font-weight: 600; margin-left: 8px; font-size: 13px; }
+
+.controls { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 12px 0;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-bottom: 1px solid var(--line); margin: 14px 0 16px; }
+button, select { font: inherit; font-size: 14px; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 92px; }
+button:hover { filter: brightness(.97); }
+.scrub { flex: 1 1 220px; display: flex; align-items: center; gap: 8px; min-width: 200px; }
+.scrub input { flex: 1; accent-color: var(--accent); }
+.clock { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 48px; text-align: right; }
+.spacer { flex: 1 0 0; }
+
+.lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 860px) { .lanes { grid-template-columns: 1fr; } }
+.lane { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.lane h2 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 8px; }
+.lane h2 .dot { width: 10px; height: 10px; border-radius: 50%; }
+.lane.with h2 .dot { background: var(--ok); } .lane.without h2 .dot { background: var(--muted); }
+.lane h2 .sub { font-weight: 400; color: var(--muted); font-size: 13px; }
+
+.now { min-height: 54px; border-radius: 10px; padding: 10px 12px; background: var(--code-bg); font-size: 17px; font-weight: 600;
+  display: flex; align-items: center; gap: 10px; transition: background .25s; }
+.now.ok { background: var(--ok-soft); } .now.err { background: var(--err-soft); } .now.try { background: var(--try-soft); }
+.now .icon { font-size: 22px; }
+.now .out { margin-left: auto; font-size: 15px; white-space: nowrap; }
+
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.stat { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-width: 0; }
+.stat .k { color: var(--muted); font-size: 12px; }
+.stat .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat .v.good { color: var(--ok); } .stat .v.bad { color: var(--err); } .stat .v.unk { color: var(--muted); }
+.stat .v.st-file { font-size: 17px; white-space: normal; line-height: 1.6; }
+@media (max-width: 520px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+
+.label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; display: flex; justify-content: space-between; gap: 8px; }
+.grid { display: grid; grid-template-columns: repeat(20, 1fr); gap: 3px; }
+.cell { aspect-ratio: 1; border-radius: 3px; background: var(--idle); transition: background .25s, transform .2s; }
+.cell.ok { background: var(--ok); } .cell.error { background: var(--err); }
+.cell.hole { background: var(--hole); outline: 1.5px dashed var(--hole-edge); outline-offset: -1.5px; }
+.cell.focus { outline: 2.5px solid var(--try); outline-offset: 1px; transform: scale(1.15); z-index: 1; }
+.cell.focus.bad { outline-color: var(--err); }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; background: var(--c); }
+.legend .lh::before { background: transparent; outline: 1.5px dashed var(--hole-edge); outline-offset: -1.5px; }
+
+.code { background: var(--code-bg); border-radius: 8px; padding: 8px 0; font-size: 12.5px; overflow-x: auto; }
+.code .row { display: flex; gap: 10px; padding: 1px 10px 1px 0; white-space: pre; border-left: 4px solid transparent; min-height: 19px; }
+.code .row .n { color: var(--muted); width: 34px; text-align: right; flex: none; user-select: none; }
+.code .row.ok { border-left-color: var(--ok); } .code .row.error { border-left-color: var(--err); background: var(--err-soft); }
+.code .row.unchecked { border-left-color: var(--idle); }
+.code .row.hole .t { color: var(--muted); font-style: italic; }
+.code .row.focus { background: var(--try-soft); } .code .row.focus.bad { background: var(--err-soft); }
+
+.sees { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; height: 190px; overflow: auto; white-space: pre-wrap; margin: 0; }
+.sees.raw { color: var(--muted); }
+.sees .msg { color: var(--err); font-weight: 600; }
+.sees .goal { color: var(--ink); }
+
+.log { list-style: none; margin: 0; padding: 0; font-size: 14px; display: flex; flex-direction: column; gap: 4px; max-height: 210px; overflow: auto; }
+.log li { display: flex; gap: 8px; padding: 4px 6px; border-radius: 6px; align-items: baseline; }
+.log li.cur { background: var(--code-bg); }
+.log .ts { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; width: 36px; flex: none; }
+.log .tx { flex: 1; min-width: 0; }
+.log .tx code { display: block; font-size: 12px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+.log .o { flex: none; }
+body:not(.tech) .log .tx code { display: none; }
+
+.result { border-radius: 10px; padding: 12px; font-weight: 700; font-size: 18px; text-align: center; display: none; }
+.result.success { display: block; background: var(--ok-soft); color: var(--ok); }
+.result.fail { display: block; background: var(--err-soft); color: var(--err); }
+
+.summary { margin-top: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: none; box-shadow: var(--shadow); }
+.summary.show { display: block; }
+.summary h3 { margin: 0 0 10px; }
+.summary table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.summary th, .summary td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.summary td.good { color: var(--ok); font-weight: 700; } .summary td.bad { color: var(--err); font-weight: 700; }
+details.data { margin-top: 20px; color: var(--muted); font-size: 13px; }
+details.data label { display: inline-flex; gap: 6px; align-items: center; margin: 6px 16px 0 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 data-i="title"></h1>
+    <p data-i="subtitle"></p>
+    <div class="task"><span data-i="task"></span><span class="mockflag" id="mockflag" data-i="mock"></span></div>
+  </header>
+
+  <div class="controls">
+    <button class="primary" id="play"></button>
+    <button id="step" data-i="step"></button>
+    <button id="reset" data-i="reset"></button>
+    <select id="speed" aria-label="speed">
+      <option value="1">1×</option><option value="3">3×</option><option value="6" selected>6×</option><option value="15">15×</option>
+    </select>
+    <div class="scrub"><input type="range" id="scrub" min="0" step="0.1" value="0"><span class="clock" id="clock">0:00</span></div>
+    <label style="font-size:14px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="tech"><span data-i="tech"></span></label>
+    <button id="lang">中文</button>
+  </div>
+
+  <div class="lanes" id="lanes"></div>
+
+  <section class="summary" id="summary">
+    <h3 data-i="sumTitle"></h3>
+    <table><thead><tr><th></th><th id="sumA"></th><th id="sumB"></th></tr></thead><tbody id="sumBody"></tbody></table>
+  </section>
+
+  <details class="data">
+    <summary data-i="dataTitle"></summary>
+    <p data-i="dataHelp"></p>
+    <label><span data-i="loadWith"></span> <input type="file" accept=".jsonl,.json" data-lane="with"></label>
+    <label><span data-i="loadWithout"></span> <input type="file" accept=".jsonl,.json" data-lane="without"></label>
+  </details>
+</div>
+
+<script src="mock-trace.js"></script>
+<script src="real-trace.js"></script>
+<script>
+const I18N = {
+  en: {
+    title: "Same AI, same task: with and without a control interface",
+    subtitle: "EasyCrypt checks cryptographic proofs line by line. Left: the AI drives it through our MCP tools. Right: the AI can only edit the file and run the checker.",
+    task: "Task: ", mock: "Mock data", real: "Real run", play: "▶ Play", pause: "⏸ Pause", step: "⏭ Next step", reset: "↺ Restart",
+    tech: "Show technical details", gridLabel: "The whole proof file, one square per line",
+    lOk: "checked ✓", lErr: "error", lIdle: "not checked yet", lHole: "missing (to be written)",
+    holeLabel: "The missing part", seesLabel: "What the AI sees", logLabel: "Steps so far",
+    sTime: "Time", sCalls: "Actions", sGoals: "Left to prove", sFile: "Real file",
+    fileOk: "✓ valid", fileBad: "✗ broken", buried: "?", buriedTip: "Somewhere in the raw output, but not handed to the AI", waiting: "Waiting to start…",
+    success: "✅ Proof complete. EasyCrypt accepts the whole file.", fail: "❌ Gave up. The proof still doesn't check.",
+    ok: "✅ works", bad: "❌ doesn't work", missingLine: "(missing)",
+    sumTitle: "Result", rDone: "Proof finished?", rTime: "Time taken", rCalls: "Actions taken", rFails: "Failed attempts",
+    rBroken: "Real file ever broken?", yes: "Yes", no: "No",
+    dataTitle: "Use real traces", loadWith: "With MCP trace:", loadWithout: "Without MCP trace:",
+    dataHelp: "Load a trace.jsonl recorded by mcp_server.py (one {t, tool, args, result} object per line). The file layout comes from mock-trace.js unless the first line is {\"file\": …}.",
+    seesNothing: "(nothing yet)",
+    tools: {
+      easycrypt_config: () => ["🔌", "Checking that EasyCrypt is ready"],
+      check_file: () => ["📋", "Checking the whole proof"],
+      goals_at: a => ["🔍", `Looking at what's left to prove at line ${a.line}`],
+      try_snippet: a => ["🧪", `Trying a step at line ${a.line}`],
+      apply_snippet: a => ["✍️", `Writing the working step into line ${a.line}`],
+      search_lib: a => ["📚", `Searching the standard library for “${a.pattern}”`],
+      edit: a => ["✍️", a.end > a.start ? `Editing lines ${a.start}–${a.end} by hand` : a.end === a.start ? `Editing line ${a.start} by hand` : `Typing new lines at line ${a.start} by hand`],
+      bash: () => ["⌨️", "Running the checker on the whole file"],
+      stop: a => ["🛑", a.reason === "solved" ? "Done" : "Stopped: out of attempts"],
+    },
+    checkFail: l => `❌ error at line ${l}`, checkOk: "✅ all lines pass",
+  },
+  zh: {
+    title: "同一个 AI，同一个任务：有没有操作接口的区别",
+    subtitle: "EasyCrypt 会逐行检查密码学证明。左边：AI 通过我们的 MCP 工具操作它。右边：AI 只能改文件、运行检查器。",
+    task: "任务：", mock: "模拟数据", real: "真实运行", play: "▶ 播放", pause: "⏸ 暂停", step: "⏭ 下一步", reset: "↺ 重来",
+    tech: "显示技术细节", gridLabel: "整个证明文件，每格是一行",
+    lOk: "已通过 ✓", lErr: "出错", lIdle: "还没检查", lHole: "缺失（待补写）",
+    holeLabel: "缺失的部分", seesLabel: "AI 看到的内容", logLabel: "已执行的步骤",
+    sTime: "用时", sCalls: "操作次数", sGoals: "还剩要证", sFile: "原文件",
+    fileOk: "✓ 有效", fileBad: "✗ 已损坏", buried: "?", buriedTip: "藏在原始输出的某处，没有直接交给 AI", waiting: "等待开始…",
+    success: "✅ 证明完成，EasyCrypt 接受整个文件。", fail: "❌ 放弃了，证明仍然没通过。",
+    ok: "✅ 可以", bad: "❌ 不行", missingLine: "（缺失）",
+    sumTitle: "结果对比", rDone: "证明完成了吗？", rTime: "用时", rCalls: "操作次数", rFails: "失败的尝试",
+    rBroken: "原文件被改坏过吗？", yes: "是", no: "否",
+    dataTitle: "使用真实记录", loadWith: "有 MCP 的记录：", loadWithout: "没有 MCP 的记录：",
+    dataHelp: "载入 mcp_server.py 记录的 trace.jsonl（每行一个 {t, tool, args, result}）。文件内容默认取自 mock-trace.js，除非第一行是 {\"file\": …}。",
+    seesNothing: "（还没有）",
+    tools: {
+      easycrypt_config: () => ["🔌", "确认 EasyCrypt 已就绪"],
+      check_file: () => ["📋", "检查整份证明"],
+      goals_at: a => ["🔍", `查看第 ${a.line} 行还剩什么要证`],
+      try_snippet: a => ["🧪", `在第 ${a.line} 行试一步`],
+      apply_snippet: a => ["✍️", `把可行的这一步写进第 ${a.line} 行`],
+      search_lib: a => ["📚", `在标准库里搜索 “${a.pattern}”`],
+      edit: a => ["✍️", a.end > a.start ? `手动改第 ${a.start}–${a.end} 行` : a.end === a.start ? `手动改第 ${a.start} 行` : `在第 ${a.start} 行手动写入新内容`],
+      bash: () => ["⌨️", "对整个文件运行检查器"],
+      stop: a => ["🛑", a.reason === "solved" ? "完成" : "停止：尝试次数用完"],
+    },
+    checkFail: l => `❌ 第 ${l} 行出错`, checkOk: "✅ 全部通过",
+  },
+};
+let lang = "en";
+const T = () => I18N[lang];
+
+// real-trace.js (recorded runs) wins when present; add ?mock to the URL to see the old mock data.
+const DATA = (!/[?&]mock\b/.test(location.search) && window.REPLAY_DATA_REAL) || window.REPLAY_DATA;
+if (DATA.mock && DATA.file.overwrite == null) DATA.file.overwrite = true;  // mock traces fill pre-blanked lines in place
+if (DATA.mock && !DATA.file.task_zh) DATA.file.task_zh = "补全引理 ddh1_gb 缺失的证明（第 103–112 行）";
+const LANES = ["with", "without"];
+const lanes = { with: DATA.lanes.with, without: DATA.lanes.without };
+let file = DATA.file;
+
+// ---------- trace -> state ----------
+const goalsLeft = g => {
+  if (g == null) return null;
+  if (/no more goals/i.test(g)) return 0;
+  const m = /remaining:\s*(\d+)/.exec(g);
+  return m ? +m[1] : (g.trim() ? 1 : null);
+};
+const firstErrorLine = r => {
+  const d = (r.diagnostics || []).find(d => ["critical", "error"].includes(d.severity));
+  if (d) return d.line;
+  const m = /\[(?:critical|error)\]\s*\[[^\]]*?line (\d+)/.exec(r.stderr || "");
+  return m ? +m[1] : null;
+};
+
+// The proof being written lives in s.region = [first, last] (1-based, last < first when empty).
+// apply_snippet and edit insert/replace lines like the real tools do, so later line numbers shift.
+function initState() {
+  const [h0, h1] = file.hole;
+  const text = file.start.slice();
+  const s = { text, status: [], region: [h0, h1], focus: null, goals: null, sees: null, seesRaw: false, calls: 0, fails: 0,
+              broken: false, everBroken: false, done: null, last: null, log: [], end: 0 };
+  s.status = text.map((_, i) => isHole(s, i) ? "hole" : "unchecked");
+  return s;
+}
+const isHole = (s, i) => i + 1 >= s.region[0] && i + 1 <= s.region[1] && !s.text[i].trim();
+const gapOpen = s => s.region[1] < s.region[0];  // nothing written yet where the proof belongs
+// Replace lines [start, end] (1-based; end = start - 1 inserts) with `lines`, keeping s.region in step.
+function splice(s, start, end, lines, st) {
+  const del = Math.max(0, end - start + 1), d = lines.length - del, [r0, r1] = s.region;
+  s.text.splice(start - 1, del, ...lines);
+  s.status.splice(start - 1, del, ...lines.map(() => st));
+  if (start >= r0 && start <= r1 + 1) s.region = [r0, r1 + d];
+  else if (start < r0) s.region = [r0 + d, r1 + d];
+}
+function markOkBefore(s, line) { for (let i = 0; i < line - 1 && i < s.status.length; i++) if (!isHole(s, i)) s.status[i] = "ok"; }
+function invalidateFrom(s, line) { for (let i = line - 1; i < s.status.length; i++) s.status[i] = isHole(s, i) ? "hole" : "unchecked"; }
+
+function apply(s, e) {
+  const a = e.args || {}, r = e.result || {};
+  const entry = { t: e.t, tool: e.tool, args: a, outcome: null, cls: "" };
+  s.focus = null;
+  if (e.tool !== "stop") s.calls++;
+  switch (e.tool) {
+    case "check_file": case "bash": {
+      if (r.ok) {
+        s.text.forEach((_, i) => s.status[i] = isHole(s, i) ? "hole" : "ok");
+        s.goals = 0; s.done = "success"; s.broken = false;
+        entry.outcome = "checkOk"; entry.cls = "ok";
+      } else {
+        const l = firstErrorLine(r) || 1;
+        invalidateFrom(s, 1); markOkBefore(s, l);
+        if (s.status[l - 1] !== "hole") s.status[l - 1] = "error";
+        s.focus = { line: l, bad: true };
+        entry.outcome = ["checkFail", l]; entry.cls = "err";
+        if (e.tool === "bash") { s.goals = "?"; s.fails++; } else s.goals = goalsLeft(r.goals);
+      }
+      if (e.tool === "bash") { s.sees = (r.stderr || "") + (r.stdout || ""); s.seesRaw = true; }
+      else { s.sees = { msg: (r.diagnostics || []).map(d => `line ${d.line}: ${d.message}`).join("\n"), goal: r.goals || "" }; s.seesRaw = false; }
+      break;
+    }
+    case "goals_at":
+      markOkBefore(s, a.line); s.focus = { line: a.line };
+      s.goals = goalsLeft(r.goals); s.sees = { msg: "", goal: r.goals || "" }; s.seesRaw = false;
+      entry.cls = "try";
+      break;
+    case "try_snippet":
+      markOkBefore(s, a.line); s.focus = { line: a.line, bad: !r.ok };
+      if (r.ok) { s.goals = goalsLeft(r.goals); entry.outcome = "ok"; entry.cls = "ok"; }
+      else { s.fails++; entry.outcome = "bad"; entry.cls = "err"; }
+      s.sees = { msg: r.ok ? "" : (r.diagnostics || []).map(d => d.message).join("\n") || r.error || "", goal: r.goals || "" };
+      s.seesRaw = false;
+      break;
+    case "apply_snippet": {
+      if (r.ok === false) { s.fails++; s.focus = { line: a.line, bad: true }; entry.outcome = "bad"; entry.cls = "err";
+        s.sees = { msg: (r.diagnostics || []).map(d => d.message).join("\n") || r.error || "", goal: r.goals || "" }; s.seesRaw = false; break; }
+      const lines = (a.snippet || "").replace(/\n$/, "").split("\n");
+      if (file.overwrite) lines.forEach((t, k) => { const i = a.line - 1 + k; if (i < s.text.length) { s.text[i] = t; s.status[i] = "ok"; } });
+      else { markOkBefore(s, a.line); splice(s, a.line, a.line - 1, lines, "ok"); }
+      if (r.goals != null) s.goals = goalsLeft(r.goals);
+      s.focus = { line: a.line }; entry.cls = "ok";
+      break;
+    }
+    case "search_lib":
+      s.focus = null; entry.cls = "try";
+      s.sees = { msg: "", goal: (r.hits || r.results || []).slice(0, 8).map(h => typeof h === "string" ? h : `${h.file}:${h.line}  ${h.text}`).join("\n") || JSON.stringify(r).slice(0, 600) };
+      s.seesRaw = false;
+      break;
+    case "edit": {
+      const lines = (a.text || "").split("\n");
+      if (file.overwrite) for (let i = a.start - 1, k = 0; i < a.end; i++, k++) s.text[i] = lines[k] ?? "";
+      else splice(s, a.start, a.end, lines, "unchecked");
+      invalidateFrom(s, a.start); s.broken = true; s.everBroken = true;
+      s.focus = { line: a.start }; entry.cls = "try";
+      break;
+    }
+    case "stop":
+      s.done = "fail"; entry.cls = "err";
+      break;
+  }
+  s.last = entry; s.log.push(entry); s.end = e.t;
+}
+
+function stateAt(lane, t) {
+  const s = initState();
+  for (const e of lanes[lane].events) { if (e.t > t) break; apply(s, e); }
+  return s;
+}
+const maxT = () => Math.max(...LANES.map(l => { const ev = lanes[l].events; return ev.length ? ev[ev.length - 1].t : 0; }));
+
+// ---------- rendering ----------
+const fmt = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const outText = o => !o ? "" : Array.isArray(o) ? T()[o[0]](o[1]) : T()[o];
+const stepText = e => (T().tools[e.tool] || (() => ["•", e.tool]))(e.args || {});
+const detail = e => { const a = e.args || {}; return a.snippet || a.command || a.text || ""; };
+
+function laneSkeleton(id) {
+  const el = document.createElement("section");
+  el.className = `lane ${id}`;
+  el.innerHTML = `
+    <h2><span class="dot"></span><span class="ttl"></span></h2>
+    <div class="now"><span class="icon"></span><span class="txt"></span><span class="out"></span></div>
+    <div class="stats">
+      <div class="stat"><div class="k" data-i="sTime"></div><div class="v st-time"></div></div>
+      <div class="stat"><div class="k" data-i="sCalls"></div><div class="v st-calls"></div></div>
+      <div class="stat"><div class="k" data-i="sGoals"></div><div class="v st-goals"></div></div>
+      <div class="stat"><div class="k" data-i="sFile"></div><div class="v st-file"></div></div>
+    </div>
+    <div class="result"></div>
+    <div><div class="label"><span data-i="gridLabel"></span></div><div class="grid"></div>
+      <div class="legend"><span style="--c:var(--ok)" data-i="lOk"></span><span style="--c:var(--err)" data-i="lErr"></span><span style="--c:var(--idle)" data-i="lIdle"></span><span class="lh" data-i="lHole"></span></div></div>
+    <div><div class="label"><span data-i="holeLabel"></span><span class="mono holerange"></span></div><div class="code"></div></div>
+    <div><div class="label"><span data-i="seesLabel"></span></div><pre class="sees mono"></pre></div>
+    <div><div class="label"><span data-i="logLabel"></span></div><ul class="log"></ul></div>`;
+  const grid = el.querySelector(".grid");
+  file.start.forEach((_, i) => { const c = document.createElement("div"); c.className = "cell"; grid.appendChild(c); });
+  return el;
+}
+
+const els = {};
+function build() {
+  const host = document.getElementById("lanes"); host.innerHTML = "";
+  for (const id of LANES) { els[id] = laneSkeleton(id); host.appendChild(els[id]); }
+}
+
+function renderLane(id, t) {
+  const s = stateAt(id, t), el = els[id], tr = T();
+  el.querySelector(".ttl").textContent = lanes[id].title === "With MCP" && lang === "zh" ? "有 MCP" :
+    lanes[id].title === "Without MCP" && lang === "zh" ? "没有 MCP" : lanes[id].title;
+
+  const now = el.querySelector(".now");
+  if (s.last) {
+    const [ic, tx] = stepText(s.last);
+    now.querySelector(".icon").textContent = ic; now.querySelector(".txt").textContent = tx;
+    now.querySelector(".out").textContent = outText(s.last.outcome);
+    now.className = "now " + (s.last.cls || "");
+  } else {
+    now.querySelector(".icon").textContent = "⏳"; now.querySelector(".txt").textContent = tr.waiting;
+    now.querySelector(".out").textContent = ""; now.className = "now";
+  }
+
+  const elapsed = s.done ? s.end : Math.min(t, maxT());
+  el.querySelector(".st-time").textContent = fmt(elapsed);
+  el.querySelector(".st-calls").textContent = s.calls;
+  const g = el.querySelector(".st-goals");
+  g.textContent = s.goals === "?" ? tr.buried : s.goals == null ? "–" : s.goals;
+  g.className = "v st-goals " + (s.goals === 0 ? "good" : s.goals === "?" ? "unk" : "");
+  g.title = s.goals === "?" ? tr.buriedTip : "";
+  const f = el.querySelector(".st-file");
+  f.textContent = s.broken ? tr.fileBad : tr.fileOk; f.className = "v st-file " + (s.broken ? "bad" : "good");
+
+  const res = el.querySelector(".result");
+  res.className = "result " + (s.done || ""); res.textContent = s.done ? tr[s.done] : "";
+
+  // One square per line; while nothing is written yet, a dashed square marks where the proof goes.
+  const gap = gapOpen(s) && s.done !== "success", grid = el.querySelector(".grid");
+  const cells = s.text.map((_, i) => i);
+  if (gap) cells.splice(s.region[0] - 1, 0, -1);
+  while (grid.children.length < cells.length) grid.appendChild(Object.assign(document.createElement("div"), { className: "cell" }));
+  while (grid.children.length > cells.length) grid.lastChild.remove();
+  cells.forEach((i, k) => {
+    const c = grid.children[k];
+    if (i < 0) { c.className = "cell hole"; c.title = tr.missingLine; return; }
+    const foc = s.focus && s.focus.line === i + 1;
+    c.className = `cell ${s.status[i]}${foc ? " focus" + (s.focus.bad ? " bad" : "") : ""}`;
+    c.title = `${i + 1}: ${s.text[i] || tr.missingLine}`;
+  });
+
+  const [h0, h1] = s.region, code = el.querySelector(".code");
+  el.querySelector(".holerange").textContent = h1 > h0 ? `${h0}–${h1}` : h1 === h0 ? `${h0}` : "";
+  const row = (l, st, txt, foc) => `<div class="row ${st}${foc ? " focus" + (s.focus.bad ? " bad" : "") : ""}"><span class="n">${l}</span><span class="t">${esc(txt)}</span></div>`;
+  let rows = "";
+  for (let l = h0 - 1; l <= Math.max(h1, h0 - 1) + 1; l++) {
+    const i = l - 1, st = s.status[i] || "unchecked";
+    if (gap && l === h0) rows += row("", "hole", tr.missingLine, false);
+    rows += row(l, st, s.text[i] || (st === "hole" ? tr.missingLine : ""), s.focus && s.focus.line === l);
+  }
+  code.innerHTML = rows;
+
+  const sees = el.querySelector(".sees");
+  sees.className = "sees mono" + (s.seesRaw ? " raw" : "");
+  if (s.sees == null) sees.textContent = tr.seesNothing;
+  else if (s.seesRaw) sees.textContent = s.sees;
+  else sees.innerHTML = (s.sees.msg ? `<span class="msg">${esc(s.sees.msg)}</span>\n\n` : "") + `<span class="goal">${esc(s.sees.goal)}</span>`;
+
+  const log = el.querySelector(".log");
+  log.innerHTML = s.log.map((e, k) => {
+    const [ic, tx] = stepText(e), d = detail(e);
+    return `<li class="${k === s.log.length - 1 ? "cur" : ""}"><span class="ts">${fmt(e.t)}</span><span>${ic}</span>` +
+      `<span class="tx">${esc(tx)}${d ? `<code>${esc(d)}</code>` : ""}</span><span class="o">${esc(outText(e.outcome))}</span></li>`;
+  }).join("");
+  log.scrollTop = log.scrollHeight;
+  return s;
+}
+
+function renderSummary(states) {
+  const sum = document.getElementById("summary");
+  const show = LANES.every(id => states[id].done);
+  sum.classList.toggle("show", show);
+  if (!show) return;
+  const tr = T(), [a, b] = LANES.map(id => states[id]);
+  document.getElementById("sumA").textContent = els.with.querySelector(".ttl").textContent;
+  document.getElementById("sumB").textContent = els.without.querySelector(".ttl").textContent;
+  const done = s => s.done === "success";
+  const row = (k, va, vb, ga, gb) => `<tr><th>${tr[k]}</th><td class="${ga}">${va}</td><td class="${gb}">${vb}</td></tr>`;
+  document.getElementById("sumBody").innerHTML =
+    row("rDone", done(a) ? "✅ " + tr.yes : "❌ " + tr.no, done(b) ? "✅ " + tr.yes : "❌ " + tr.no, done(a) ? "good" : "bad", done(b) ? "good" : "bad") +
+    row("rTime", fmt(a.end), fmt(b.end), "", "") +
+    row("rCalls", a.calls, b.calls, "", "") +
+    row("rFails", a.fails, b.fails, "", "") +
+    row("rBroken", a.everBroken ? tr.yes : tr.no, b.everBroken ? tr.yes : tr.no, a.everBroken ? "bad" : "good", b.everBroken ? "bad" : "good");
+}
+
+function applyI18n() {
+  const tr = T();
+  document.documentElement.lang = lang === "zh" ? "zh" : "en";
+  document.querySelectorAll("[data-i]").forEach(n => { const v = tr[n.dataset.i]; if (typeof v === "string") n.textContent = v; });
+  document.querySelector('[data-i="task"]').textContent = tr.task + (lang === "zh" && file.task_zh || file.task);
+  const flag = document.getElementById("mockflag"), isMock = DATA.mock && !usingReal;
+  flag.textContent = isMock ? tr.mock : tr.real;
+  flag.title = isMock ? "" : (DATA.source && DATA.source[lang]) || "";
+  document.getElementById("lang").textContent = lang === "en" ? "中文" : "English";
+  updatePlay();
+}
+
+// ---------- playback ----------
+let t = 0, playing = false, lastFrame = 0, usingReal = false;
+const scrub = document.getElementById("scrub"), playBtn = document.getElementById("play");
+function render() {
+  scrub.max = maxT(); scrub.value = t;
+  document.getElementById("clock").textContent = fmt(t);
+  const states = {}; for (const id of LANES) states[id] = renderLane(id, t);
+  renderSummary(states);
+}
+function updatePlay() { playBtn.textContent = playing ? T().pause : T().play; }
+function frame(ts) {
+  if (!playing) return;
+  const dt = lastFrame ? (ts - lastFrame) / 1000 : 0; lastFrame = ts;
+  t = Math.min(maxT(), t + dt * +document.getElementById("speed").value);
+  render();
+  if (t >= maxT()) { playing = false; updatePlay(); return; }
+  requestAnimationFrame(frame);
+}
+playBtn.onclick = () => {
+  if (t >= maxT()) t = 0;
+  playing = !playing; lastFrame = 0; updatePlay();
+  if (playing) requestAnimationFrame(frame);
+};
+document.getElementById("step").onclick = () => {
+  playing = false; updatePlay();
+  const next = LANES.flatMap(id => lanes[id].events.map(e => e.t)).filter(x => x > t + 1e-6).sort((a, b) => a - b)[0];
+  t = next ?? maxT(); render();
+};
+document.getElementById("reset").onclick = () => { playing = false; t = 0; updatePlay(); render(); };
+scrub.oninput = () => { playing = false; updatePlay(); t = +scrub.value; render(); };
+document.getElementById("tech").onchange = e => document.body.classList.toggle("tech", e.target.checked);
+document.getElementById("lang").onclick = () => { lang = lang === "en" ? "zh" : "en"; applyI18n(); render(); };
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" && e.target.type !== "range") return;
+  if (e.key === " ") { e.preventDefault(); playBtn.click(); }
+  else if (e.key === "ArrowRight") document.getElementById("step").click();
+});
+
+document.querySelectorAll('input[type=file]').forEach(inp => inp.onchange = async () => {
+  const f = inp.files[0]; if (!f) return;
+  try {
+    const rows = (await f.text()).split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
+    if (rows[0] && rows[0].file) { file = rows.shift().file; build(); applyI18n(); }
+    const t0 = rows.length ? rows[0].t : 0;
+    lanes[inp.dataset.lane] = { ...lanes[inp.dataset.lane], events: rows.map(r => ({ ...r, t: r.t - t0 })) };
+    usingReal = true; t = 0; applyI18n(); render();
+  } catch (err) { alert("Could not read trace: " + err.message); }
+});
+
+build(); applyI18n(); render();
+</script>
+</body>
+</html>
