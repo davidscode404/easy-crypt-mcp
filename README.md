@@ -19,6 +19,35 @@ uvicorn http_api:app --port 8000                # optional
 Env: `EASYCRYPT_BIN`, `EASYCRYPT_ARGS` (extra `llm` flags, e.g. solvers and SMT timeout),
 `EASYCRYPT_ROOT` (sandbox: only files under it), `EASYCRYPT_WALL` (seconds per call, default 120).
 
+## Docker (recommended: no local EasyCrypt install)
+
+The image is built on EasyCrypt's own CI image, which already has OCaml, every dependency
+and the SMT solvers. It's x86_64-only; on Apple Silicon it runs under emulation.
+
+```bash
+docker pull --platform linux/amd64 ghcr.io/easycrypt/ec-build-box:main   # check the base is reachable
+docker build --platform linux/amd64 -t easycrypt-mcp .                   # ~5–10 min, self-tests `llm`
+docker run --rm --platform linux/amd64 easycrypt-mcp easycrypt config     # solvers listed?
+```
+
+Register with Claude Code from the folder holding your `.ec` files. The folder is mounted at
+the **same path** inside the container, so the paths Claude passes work on both sides:
+
+```bash
+claude mcp add easycrypt -- docker run -i --rm --platform linux/amd64 \
+  -v "$PWD:$PWD" -w "$PWD" -e EASYCRYPT_ROOT="$PWD" easycrypt-mcp
+```
+
+REST mirror for debugging:
+
+```bash
+docker run --rm --platform linux/amd64 -p 8000:8000 -v "$PWD:$PWD" -w "$PWD" easycrypt-mcp \
+  python3 -m uvicorn --app-dir /app http_api:app --host 0.0.0.0 --port 8000   # → localhost:8000/docs
+```
+
+Pin EasyCrypt for the demo with `--build-arg EC_REF=<commit>`. If the base image won't pull,
+the Dockerfile header has the build-it-yourself fallback.
+
 ## First thing once EasyCrypt is built
 ```bash
 easycrypt llm -help                      # confirm -lastgoals, -upto, -p, timeout flag names
