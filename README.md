@@ -24,7 +24,14 @@ docker pull --platform linux/amd64 ghcr.io/easycrypt/ec-build-box:main
 
 If this fails, see [Troubleshooting](#troubleshooting) before going further.
 
-**2. Build the image** (about 5–10 minutes; it compiles EasyCrypt and tests it):
+**2. Get the image.** CI builds and publishes it on every push, so normally just pull:
+
+```bash
+docker pull ghcr.io/davidscode404/easy-crypt-mcp:main
+docker tag  ghcr.io/davidscode404/easy-crypt-mcp:main easycrypt-mcp
+```
+
+Or build it yourself (about 5–10 minutes; it compiles EasyCrypt and tests it):
 
 ```bash
 docker build --platform linux/amd64 -t easycrypt-mcp .
@@ -45,7 +52,7 @@ You should see Alt-Ergo, Z3 and CVC5 listed.
 
 ```bash
 claude mcp add easycrypt -- docker run -i --rm --platform linux/amd64 \
-  -v "$PWD:$PWD" -w "$PWD" -e EASYCRYPT_ROOT="$PWD" easycrypt-mcp
+  -v "$PWD:$PWD" -w "$PWD" -e EASYCRYPT_ROOT="$PWD" -e EASYCRYPT_ARGS="-timeout 10" easycrypt-mcp
 ```
 
 **5. Try it.** Start `claude` in that folder and ask, for example:
@@ -65,9 +72,25 @@ claude mcp add easycrypt -- docker run -i --rm --platform linux/amd64 \
 | `check_file(path)` | Checks a whole `.ec` file. Returns whether it passed, any errors with line numbers, and the unproved goals if it failed. |
 | `goals_at(path, line, col?)` | Shows the proof state (what's left to prove) at a given line. |
 | `try_snippet(path, snippet, line?)` | Tests a tactic on a temporary copy of the file and returns the resulting goals. **Never changes your file.** |
+| `apply_snippet(path, snippet, line?)` | Same check; if it passes, writes the tactic into the file and makes one git commit (`agent: …`). The only way the agent changes a file. |
+| `search_lib(pattern)` | Greps EasyCrypt's standard library for lemma/operator declarations. (EasyCrypt's own `search` prints nothing in batch mode; names created by `clone … rename` only show up via `print`.) |
 
 A typical loop: look at the goals with `goals_at`, test a tactic with `try_snippet`, and if it
-works, write it into the file and confirm with `check_file`.
+works, `apply_snippet` it (one commit per accepted step), then confirm with `check_file`. The
+strategy — which tactics to try, when to call SMT, when to stop and report — is a Claude Code skill
+in [`.claude/skills/easycrypt-prover/SKILL.md`](.claude/skills/easycrypt-prover/SKILL.md); it loads
+automatically when you start `claude` in this repo. Design and verified facts: [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Demo
+
+[`proofs/elgamal.ec`](proofs/elgamal.ec) is EasyCrypt's own ElGamal IND-CPA ⇔ DDH example with the
+proof of the first game hop (`cpa_ddh0`, line 74) removed. From this repo's root, with the server
+added as in step 4:
+
+> Complete the proof of `cpa_ddh0` in `proofs/elgamal.ec` with the easycrypt tools.
+
+Watch `git log --oneline -- proofs/elgamal.ec` fill up, one commit per accepted tactic. The original
+is `examples/elgamal.ec` in the EasyCrypt repository.
 
 ## How it works
 
@@ -106,6 +129,14 @@ docker run --rm --platform linux/amd64 -p 8000:8000 -v "$PWD:$PWD" -w "$PWD" eas
 Open <http://localhost:8000/docs> for an interactive page where you can try each call.
 
 ## Troubleshooting
+
+**On macOS, `docker run` with `-v` hangs forever and the container stays `Created`.** Docker Desktop
+has no permission to read that folder (anything under `~/Documents`, `~/Desktop`, `~/Downloads`).
+System Settings → Privacy & Security → Files and Folders → Docker → allow the folder (or give Docker
+Full Disk Access), then retry. Folders elsewhere (e.g. `~/code`) need no permission.
+
+**Everything is slow and `nproc` inside a container says 1.** Docker Desktop's *Resource Saver*
+shrinks the VM when idle. Settings → Resources → Advanced → turn it off.
 
 **Step 1 fails (`denied` / `forbidden` / can't reach `ghcr.io`).** Build the base image yourself
 from EasyCrypt's repo. It's slower (around an hour, it compiles OCaml) but needs only GitHub:
@@ -150,4 +181,8 @@ claude mcp add easycrypt -e EASYCRYPT_BIN=easycrypt -- python "$PWD/mcp_server.p
 | `mcp_server.py` | MCP server exposing the four tools to agents. |
 | `http_api.py` | Optional REST mirror of the same tools. |
 | `Dockerfile` | The image: EasyCrypt + solvers + this server. |
-| `tests/` | Fake `easycrypt` binary and smoke tests. |
+| `tests/` | Fake `easycrypt` binary and smoke tests; `test_real.py` runs against the real binary when one is on PATH (CI does). |
+| `.github/workflows/image.yml` | Builds the image, runs the tests inside it against the real binary, publishes to GHCR. |
+| `.claude/skills/easycrypt-prover/` | The proof strategy the agent follows. |
+| `proofs/` | Demo proof files. |
+| `ARCHITECTURE.md` | Decisions, the tool contract, and what is verified against the binary. |
