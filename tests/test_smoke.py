@@ -1,13 +1,19 @@
-"""Run: cd ec_agent && python -m pytest -q tests   (uses the fake binary)."""
-import os
+"""Run: python -m pytest -q tests   (uses the fake binary)."""
 import sys
 from pathlib import Path
 
+import pytest
+
 HERE = Path(__file__).parent
-os.environ["EASYCRYPT_BIN"] = str(HERE / "fake_easycrypt.py")
 sys.path.insert(0, str(HERE.parent))
 
 import easycrypt_core as ec  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _use_fake_binary(monkeypatch):
+    # per-test, so it cannot leak into / be clobbered by tests/test_real.py
+    monkeypatch.setattr(ec, "EC_BIN", str(HERE / "fake_easycrypt.py"))
 
 
 def make(tmp_path, body):
@@ -20,6 +26,12 @@ def test_parse_real_format():
     d, left = ec.parse_diagnostics("[error] [Foo.ec:12:3] bad\n  more\n[warning] [Foo.ec:2] w")
     assert [(x.severity, x.line, x.col) for x in d] == [("error", 12, 3), ("warning", 2, None)]
     assert d[0].message == "bad\n  more" and left == ""
+    # the format real proof errors use (ecLocation.tostring)
+    d2, left2 = ec.parse_diagnostics(
+        "[critical] [Foo.ec: line 12 (3-10)] cannot apply\n"
+        "[critical] [Foo.ec: line 5 (1) to line 7 (4)] x\n"
+        "[critical] [Foo.ec: line 9 (2)] y")
+    assert [(x.line, x.col) for x in d2] == [(12, 3), (5, 1), (9, 2)] and left2 == ""
 
 
 def test_check_ok_and_fail(tmp_path):

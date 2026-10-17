@@ -25,9 +25,15 @@ EC_ROOT = os.environ.get("EASYCRYPT_ROOT")
 WALL = float(os.environ.get("EASYCRYPT_WALL", "120"))
 
 # ⚠️ The one place to fix if real `llm` output differs.
-# Expected: "[Severity] [file:LINE] message" or "[Severity] [file:LINE:COL] message".
+# Two location formats (src/ecTerminal.ml `_notice`, src/ecLocation.ml `tostring`):
+#   [warning]  [File.ec:12] msg                    notices without a precise location
+#   [critical] [File.ec: line 12 (3-10)] msg       errors; also "line 12 (3)" and
+#                                                   "line 12 (3) to line 14 (7)"
 DIAG_RE = re.compile(
-    r"^\[(?P<severity>[A-Za-z]+)\]\s*\[(?P<file>[^\]]+?):(?P<line>\d+)(?::(?P<col>\d+))?\]\s*(?P<message>.*)$"
+    r"^\[(?P<severity>[A-Za-z]+)\]\s*\[(?P<file>.+?)"
+    r"(?::(?P<line>\d+)(?::(?P<col>\d+))?"
+    r"|: line (?P<line2>\d+) \((?P<col2>\d+)(?:-\d+)?\)(?: to line \d+ \(\d+\))?)"
+    r"\]\s*(?P<message>.*)$"
 )
 
 
@@ -78,8 +84,8 @@ def parse_diagnostics(stderr: str) -> tuple[list[Diagnostic], str]:
             diags.append(Diagnostic(
                 severity=m["severity"].lower(),
                 file=m["file"],
-                line=int(m["line"]),
-                col=int(m["col"]) if m["col"] else None,
+                line=int(m["line"] or m["line2"]),
+                col=int(m["col"] or m["col2"]) if (m["col"] or m["col2"]) else None,
                 message=m["message"].strip(),
             ))
         elif diags and line.strip():
@@ -157,7 +163,9 @@ def try_snippet(path: str, snippet: str, line: int | None = None) -> Result:
     tmp = f.parent / f"Try_{uuid.uuid4().hex[:12]}{f.suffix}"
     try:
         tmp.write_text("".join(patched))
-        res = _llm(tmp, ["-upto", str(end_line)])
+        # `-upto L` stops BEFORE the command starting at line L (exclusive, src/ec.ml
+        # `past_upto`), so to execute the whole snippet we stop at the line after it.
+        res = _llm(tmp, ["-upto", str(end_line + 1)])
     finally:
         for p in (tmp, tmp.with_suffix(".eco")):
             p.unlink(missing_ok=True)

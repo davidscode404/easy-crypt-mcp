@@ -1,0 +1,59 @@
+name: image
+
+# Builds the EasyCrypt + MCP image on every push that can change it, runs the
+# smoke tests against the REAL binary inside the image, and publishes the image
+# to GHCR so nobody has to build it locally:
+#   docker pull ghcr.io/davidscode404/easy-crypt-mcp:<branch>
+
+on:
+  push:
+    branches: [main, anna, david]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - "*.py"
+      - tests/**
+      - .github/workflows/image.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The Dockerfile's own RUN step already checks that `easycrypt llm` accepts a
+      # good file and rejects a bad one, so a successful build is itself a test.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE }}:${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # [run]-verification of what ARCHITECTURE.md §3 claims from source:
+      # diagnostic format, -upto semantics, print-to-stdout.
+      - name: Smoke tests against the real binary
+        run: |
+          docker run --rm -v "$PWD:$PWD" -w "$PWD" ${{ env.IMAGE }}:${{ github.ref_name }} \
+            sh -c 'pip3 install --user --break-system-packages -q pytest && python3 -m pytest -q tests'
+
+      - name: Push image
+        if: success()
+        run: docker push ${{ env.IMAGE }}:${{ github.ref_name }}
