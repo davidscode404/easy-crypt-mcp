@@ -19,8 +19,9 @@ small file), and git history of the file is the record of what you did.
    goal open and the error appears later at `qed.` as "cannot save an incomplete proof" with no
    useful location. Always write `by auto.`, `by smt().`, `by rewrite H.` so a failed attempt fails
    on its own line.
-4. **Insert before `qed.`** (or before the first failing command), never at end of file — after an
-   insertion at EOF there is no next command to stop at and you get no goals back.
+4. **Insert before `qed.`** (or before the first failing command). Appending at end of file also
+   works — the server adds a stop marker to the temp copy — but mid-proof is what you normally want.
+   Do not read other copies of the proof (e.g. `demo/elgamal.ec`); work only from the goals.
 5. **One goal at a time.** The first failing lemma; inside it, the first open goal.
 6. **Budget: 6 attempts per goal, 30 per lemma.** When it is spent, HANDOFF (below). Do not loop.
 

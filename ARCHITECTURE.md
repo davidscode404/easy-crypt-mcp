@@ -22,15 +22,16 @@ strategy layer* — the Lean ecosystem (lean `repl`, PyPantograph, LeanDojo) did
 
 ## The tools (frozen contract between server and skill)
 
-All return a dict `{ok, exit_code, diagnostics[{severity,file,line,col,message}], goals, raw_stderr,
-note, commit}`; usage errors return `{ok:false, error}` with an actionable message.
+All return a dict `{ok, exit_code, diagnostics[{severity,file,line,col,end_line,end_col,message}]
+(columns 0-based), goals, raw_stderr, note, commit}`; usage errors return `{ok:false, error}` with an
+actionable message.
 
 | Tool | Runs | What the skill must know |
 |---|---|---|
 | `easycrypt_config()` | `easycrypt config` | Call once; lists solvers. |
 | `check_file(path)` | `llm -lastgoals F` | Whole file. On failure `goals` holds the goals at the failing point. |
 | `goals_at(path, line, col?)` | `llm -upto L` | State **before** the command at `line` runs. |
-| `try_snippet(path, snippet, line?)` | temp copy, `-upto end+1` | Inserts before `line`, runs **through** the snippet, returns goals after it. Never writes the file. Insert before `qed.`, not at EOF. |
+| `try_snippet(path, snippet, line?)` | temp copy + stop marker, `-upto end+1` | Inserts before `line` (default: EOF), runs **through** the snippet, returns goals after it. Never writes the file. |
 | `apply_snippet(path, snippet, line?, commit=True)` | `try_snippet` + write + `git commit` | Same check; if ok, writes the real file and commits `agent: <first line>`. Nothing written on failure. The only write path — one accepted step = one commit = the trace. |
 | `search_lib(pattern, limit?)` | regex over `theories/` source in the container | Finds textual declarations; names made by `clone … rename` (e.g. `dbool1E`) are invisible to it **[run]** — list the theory with `print <Theory>.` instead. |
 
@@ -64,7 +65,7 @@ statements **[run]**). EasyCrypt's own `search` prints nothing in batch mode **[
 |---|---|
 | goals → stdout; diagnostics → stderr as `[level] [loc] msg`; exit 0 ok / 1 fail | [run] |
 | `-upto L` is exclusive: the command starting at line L is not run | [run] |
-| Two `[loc]` formats: `File.ec:12` (notices) and `File.ec: line 12 (3-10)` (errors) — `DIAG_RE` accepts both | [run] |
+| `[loc]` formats: `File.ec: line 12 (3-10)` / `(3)` / `(3) to line 14 (7)` for errors **[run]**, `File.ec:12` for notices without a location **[src]** — `DIAG_RE` accepts all | [run] |
 | Log threshold is Warning: no `info` noise, and `search`/`locate` output is dropped | [run] |
 | `print` goes to stdout; `print <Theory>.` lists its contents | [run] |
 | `trivial`/`auto` never fail — an unclosed goal errors later at `qed.` ("cannot save an incomplete proof"). Closing attempts must be `by <tactic>.` | [run] |

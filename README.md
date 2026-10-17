@@ -186,5 +186,6 @@ claude mcp add easycrypt -e EASYCRYPT_BIN=easycrypt -- python "$PWD/mcp_server.p
 | `tests/` | Fake `easycrypt` binary and smoke tests; `test_real.py` runs against the real binary when one is on PATH (CI does). |
 | `.github/workflows/image.yml` | Builds the image, runs the tests inside it against the real binary, publishes to GHCR. |
 | `.claude/skills/easycrypt-prover/` | The proof strategy the agent follows. |
-| `proofs/` | Demo proof files. |
+| `proofs/` | Demo proof files (`elgamal.ec` with one proof removed). |
+| `demo/elgamal.ec` | The complete original, used for the end-to-end `check_file` run; the agent is told not to read it. |
 | `ARCHITECTURE.md` | Decisions, the tool contract, and what is verified against the binary. |

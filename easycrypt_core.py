@@ -28,15 +28,18 @@ WALL = float(os.environ.get("EASYCRYPT_WALL", "120"))
 THEORIES_ROOT = os.environ.get("EASYCRYPT_THEORIES")
 GIT_AUTHOR = os.environ.get("EASYCRYPT_GIT_AUTHOR", "easycrypt-agent <agent@easycrypt-mcp>")
 
-# ⚠️ The one place to fix if real `llm` output differs.
-# Two location formats (src/ecTerminal.ml `_notice`, src/ecLocation.ml `tostring`):
-#   [warning]  [File.ec:12] msg                    notices without a precise location
-#   [critical] [File.ec: line 12 (3-10)] msg       errors; also "line 12 (3)" and
-#                                                   "line 12 (3) to line 14 (7)"
+# Verified against a real build (r2026.09/10) and src/ecLocation.ml `tostring`. Four location forms:
+#   [critical] [Bad.ec: line 2 (16-20)] msg              same line, cols 16..20
+#   [critical] [Bad.ec: line 2 (16)] msg                 single point
+#   [critical] [Bad.ec: line 2 (16) to line 4 (3)] msg   spans lines
+#   [warning]  [Bad.ec:7] msg                            notice without a precise location
+#                                                        (src/ecTerminal.ml `_notice`, subloc=None)
+# Columns are 0-based.
 DIAG_RE = re.compile(
     r"^\[(?P<severity>[A-Za-z]+)\]\s*\[(?P<file>.+?)"
-    r"(?::(?P<line>\d+)(?::(?P<col>\d+))?"
-    r"|: line (?P<line2>\d+) \((?P<col2>\d+)(?:-\d+)?\)(?: to line \d+ \(\d+\))?)"
+    r"(?:: line (?P<line>\d+) \((?P<col>\d+)(?:-(?P<end_col>\d+))?\)"
+    r"(?: to line (?P<end_line>\d+) \((?P<end_col2>\d+)\))?"
+    r"|:(?P<line2>\d+)(?::(?P<col2>\d+))?)"
     r"\]\s*(?P<message>.*)$"
 )
 
@@ -46,7 +49,9 @@ class Diagnostic:
     severity: str
     file: str
     line: int
-    col: int | None
+    col: int | None  # 0-based
+    end_line: int | None
+    end_col: int | None
     message: str
 
 
@@ -86,11 +91,17 @@ def parse_diagnostics(stderr: str) -> tuple[list[Diagnostic], str]:
     for line in stderr.splitlines():
         m = DIAG_RE.match(line.strip())
         if m:
+            line_no = int(m["line"] or m["line2"])
+            col = m["col"] or m["col2"]
+            end_line = int(m["end_line"]) if m["end_line"] else line_no
+            end_col = m["end_col"] or m["end_col2"] or col
             diags.append(Diagnostic(
                 severity=m["severity"].lower(),
                 file=m["file"],
-                line=int(m["line"] or m["line2"]),
-                col=int(m["col"] or m["col2"]) if (m["col"] or m["col2"]) else None,
+                line=line_no,
+                col=int(col) if col else None,
+                end_line=end_line,
+                end_col=int(end_col) if end_col else None,
                 message=m["message"].strip(),
             ))
         elif diags and line.strip():
@@ -140,13 +151,18 @@ def check_file(path: str) -> Result:
 
 
 def goals_at(path: str, line: int, col: int | None = None) -> Result:
-    """Proof state after checking up to LINE[:COL]."""
+    """Proof state just BEFORE the first command starting at LINE (or at LINE:COL, col 0-based),
+    i.e. after everything above it. EasyCrypt's -upto is exclusive (src/ec.ml `past_upto`)."""
     f = _resolve(path)
     n = len(f.read_text().splitlines())
     if not 1 <= line <= n:
         raise ECError(f"line {line} out of range (file has {n} lines)")
     pos = f"{line}:{col}" if col is not None else str(line)
-    return _llm(f, ["-upto", pos])
+    res = _llm(f, ["-upto", pos])
+    if res.ok and not res.goals:
+        res.note = ("No command starts at or after this position, so EasyCrypt printed no goals. "
+                    "Use check_file for the end-of-file state.")
+    return res
 
 
 # ---------------------------------------------------------------- snippets
@@ -170,9 +186,11 @@ def _check_patch(f: Path, text: str, end_line: int) -> Result:
     # don't collide. Theory name comes from the filename, so keep it a valid identifier.
     tmp = f.parent / f"Try_{uuid.uuid4().hex[:12]}{f.suffix}"
     try:
-        tmp.write_text(text)
-        # `-upto L` stops BEFORE the command starting at line L (exclusive, src/ec.ml
-        # `past_upto`), so to execute the whole snippet we stop at the line after it.
+        # `-upto L` stops BEFORE the command starting at line L (exclusive, src/ec.ml `past_upto`)
+        # and prints goals only when it meets a later command. So stop at the line after the
+        # snippet and append a stop marker in case nothing follows. The marker is only parsed,
+        # never executed — and it lives in this temp copy only, never in the real file.
+        tmp.write_text(text + ("" if text.endswith("\n") else "\n") + "qed.\n")
         res = _llm(tmp, ["-upto", str(end_line + 1)])
     finally:
         for p in (tmp, tmp.with_suffix(".eco")):
