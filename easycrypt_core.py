@@ -211,8 +211,9 @@ def try_snippet(path: str, snippet: str, line: int | None = None) -> Result:
     text, at, end_line = _patch(f, snippet, line)
     res = _check_patch(f, text, end_line)
     res.note = (f"Snippet occupied lines {at}-{end_line} of a temp copy; "
-                f"diagnostic line numbers refer to that copy. Original file unchanged."
-                + (" Every line after the snippet still checks." if res.ok else ""))
+                f"diagnostic line numbers refer to that copy. Original file unchanged. "
+                f"Checked through the end of the snippet only; lines after it were NOT run - "
+                f"use check_file after applying.")
     return res
 
 

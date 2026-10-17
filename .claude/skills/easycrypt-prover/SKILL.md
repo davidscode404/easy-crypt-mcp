@@ -58,8 +58,9 @@ Structural errors and their usual cause:
 
 `swap{1} i k.` moves instruction *i* of program 1 by *k* positions (negative = earlier); instructions
 are numbered in the listing `goals` prints. A structural step like `swap` has nothing to close, so
-rule 3 (`by …`) does not apply to it — it is verified by the next existing line now passing, which
-`try_snippet` checks for you because it re-runs the whole file.
+rule 3 (`by …`) does not apply to it. `try_snippet` stops right after the inserted step, so judge a
+structural step by the goals it returns (are the programs lined up now?), then `apply_snippet` and
+let `check_file` run the lines after it.
 
 ## Tactic ladder
 
@@ -106,8 +107,10 @@ rule 3 (`by …`) does not apply to it — it is verified by the next existing l
   included. `raw_stderr` is set only when nothing could be parsed.
 - `note` on `try_snippet`/`apply_snippet` tells you which lines the snippet occupied.
 - `goals` after a successful `try_snippet`/`apply_snippet` is the state *after* the snippet; on a
-  failed `check_file` it is the state *before* the failing line. `ok: true` with no diagnostics
-  from `try_snippet` also means every line after the insertion still passes.
+  failed `check_file` it is the state *before* the failing line. `ok: true` from `try_snippet`
+  means the file checks **through the end of the snippet only** - the lines after it were not run.
+  The goals it returns tell you whether the *next* existing line can succeed; `check_file` after
+  `apply_snippet` is what confirms the rest of the proof.
 
 ## HANDOFF
 
