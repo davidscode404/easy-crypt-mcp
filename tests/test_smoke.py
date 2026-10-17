@@ -61,3 +61,40 @@ def test_bad_inputs(tmp_path):
         ec.goals_at(str(make(tmp_path, "a\n")), 99)
     with pytest.raises(ec.ECError):
         ec.check_file(str(tmp_path / "nope.ec"))
+
+def test_apply_snippet_writes_and_commits(tmp_path):
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    body = "lemma l : true.\nproof.\nqed.\n"
+    f = make(tmp_path, body)
+    bad = ec.apply_snippet(str(f), "FAIL.", line=3)
+    assert not bad.ok and f.read_text() == body and bad.commit == ""
+    good = ec.apply_snippet(str(f), "trivial.", line=3)
+    assert good.ok and f.read_text() == "lemma l : true.\nproof.\ntrivial.\nqed.\n"
+    assert good.commit, good.note
+    log = subprocess.run(["git", "log", "--oneline"], cwd=tmp_path, capture_output=True, text=True).stdout
+    assert "agent: trivial." in log
+
+
+def test_apply_snippet_outside_a_repo(tmp_path_factory):
+    # written, not committed, still ok
+    d = tmp_path_factory.mktemp("norepo")  # sibling of tmp_path, not inside any repo
+    f = make(d, "lemma l : true.\nproof.\nqed.\n")
+    r = ec.apply_snippet(str(f), "trivial.", line=3)
+    assert r.ok and r.commit == "" and "Not committed" in r.note, r.note
+    assert f.read_text() == "lemma l : true.\nproof.\ntrivial.\nqed.\n"
+
+
+def test_search_lib(tmp_path, monkeypatch):
+    lib = tmp_path / "theories"
+    (lib / "sub").mkdir(parents=True)
+    (lib / "DBool.ec").write_text("theory DBool.\n  (* dbool1E is used below *)\nlemma dbool1E b : mu1 dbool b = 1%r/2%r.\nend DBool.\n")
+    (lib / "sub" / "X.eca").write_text("op foo : int.\n")
+    (lib / "README.md").write_text("foo dbool1E\n")  # not .ec: ignored
+    monkeypatch.setattr(ec, "THEORIES_ROOT", str(lib))
+    r = ec.search_lib("dbool1e")
+    assert r["total"] == 2 and r["matches"][0]["line"] == 3  # declaration first
+    assert ec.search_lib("foo")["matches"] == [{"file": "sub/X.eca", "line": 1, "text": "op foo : int."}]
+    import pytest
+    with pytest.raises(ec.ECError):
+        ec.search_lib("(")

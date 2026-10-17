@@ -22,6 +22,10 @@ class SnippetReq(BaseModel):
     line: int | None = None
 
 
+class ApplyReq(SnippetReq):
+    commit: bool = True
+
+
 def _call(fn, *a):
     try:
         r = fn(*a)
@@ -48,3 +52,13 @@ def goals(req: GoalsReq):
 @app.post("/try")
 def try_(req: SnippetReq):
     return _call(ec.try_snippet, req.path, req.snippet, req.line)
+
+
+@app.post("/apply")
+def apply(req: ApplyReq):
+    return _call(ec.apply_snippet, req.path, req.snippet, req.line, req.commit)
+
+
+@app.get("/search")
+def search(pattern: str, limit: int = 40):
+    return _call(ec.search_lib, pattern, limit)

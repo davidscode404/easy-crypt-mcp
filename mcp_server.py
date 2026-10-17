@@ -52,5 +52,26 @@ def try_snippet(path: str, snippet: str, line: int | None = None) -> dict:
     return _wrap(ec.try_snippet, path, snippet, line)
 
 
+@mcp.tool()
+def apply_snippet(path: str, snippet: str, line: int | None = None, commit: bool = True) -> dict:
+    """Like try_snippet, but if the tactics are accepted, WRITE them into the real file (before
+    `line`, or at the end) and git-commit that file as `agent: <first line>`. Returns the same
+    fields plus `commit` (short sha, "" if not committed — `note` says why). On failure nothing
+    is written. Prefer this over editing the file yourself: one accepted step = one commit."""
+    return _wrap(ec.apply_snippet, path, snippet, line, commit)
+
+
+@mcp.tool()
+def search_lib(pattern: str, limit: int = 40) -> dict:
+    """Search EasyCrypt's standard library for a case-insensitive regex — a name fragment like
+    `dbool1` or a statement shape like `mu1 .* dbool`. Declarations come first. Then see a hit's
+    full statement with try_snippet(path, "print <name>."). (EasyCrypt's own `search` command
+    prints nothing in batch mode, so use this instead.)"""
+    try:
+        return ec.search_lib(pattern, limit)
+    except ec.ECError as e:
+        return {"ok": False, "error": str(e)}
+
+
 if __name__ == "__main__":
     mcp.run()

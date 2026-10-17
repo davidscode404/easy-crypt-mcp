@@ -87,3 +87,17 @@ def test_print_output_comes_back_on_stdout(tmp_path):
     r = ec.try_snippet(str(make(tmp_path, GOOD)), "print t.")
     assert r.ok, r
     assert "lemma t" in r.goals, r.goals
+
+
+def test_apply_snippet_real(tmp_path):
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    f = make(tmp_path, "lemma t : true.\nproof.\nqed.\n")
+    r = ec.apply_snippet(str(f), "by trivial.", line=3)
+    assert r.ok and r.commit, r
+    assert ec.check_file(str(f)).ok
+
+
+def test_search_lib_finds_dbool1E():
+    r = ec.search_lib(r"lemma dbool1E")
+    assert r["total"] >= 1 and r["matches"][0]["file"].endswith("DBool.ec"), r
