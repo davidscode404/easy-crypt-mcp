@@ -82,7 +82,8 @@ has none. The skill tells the agent:
 
 ## Setup
 
-There are two ways to run EasyCrypt. Pick one.
+There are two ways to run EasyCrypt. Pick one. The live demo works with either: Option B as
+described, or Option A plus the two extra steps at the end of it.
 
 ### Option A: Docker (simplest for using the tools from Claude Code)
 
@@ -119,7 +120,19 @@ Then ask Claude, for example: *"Prove the empty lemma in `proofs/elgamal.ec` wit
 On Apple Silicon the image runs under emulation, so SMT calls are slower. Raise `-timeout` if
 calls time out.
 
-### Option B: native install (needed for the live demo)
+**To run the live demo on top of Option A** (no opam install; this is how it was rehearsed on an
+Intel Mac): do steps 2 and 3 of Option B (the Python environment and a logged-in `claude`), then
+start the demo with EasyCrypt pointed at the wrapper that runs it inside the image:
+
+```bash
+EASYCRYPT_BIN="$PWD/scripts/ec-docker" .venv/bin/python demo/repair/live_server.py
+```
+
+Each tool call then starts a container (about 5 s each on a one-core Docker VM; give Docker more
+CPUs in its settings if that is slow). `search_lib` cannot see the standard library in this setup —
+it says so if the agent calls it — the rest works unchanged.
+
+### Option B: native install
 
 EasyCrypt installed through opam, plus a Python virtual environment for the MCP server.
 
@@ -141,12 +154,15 @@ easycrypt why3config && easycrypt config
 `easycrypt config` should list at least Alt-Ergo. The demo looks for the binary at
 `~/.opam/easycrypt/bin/easycrypt` unless `EASYCRYPT_BIN` is set.
 
-**2. Python environment** (from the repo root). On Intel macOS use Python ≤ 3.13 and an older
-`cryptography` wheel, because the newest one does not build there:
+**2. Python environment** (from the repo root), Python 3.10 or newer. On Intel macOS use
+Python ≤ 3.13 and an older `cryptography` wheel, because the newest one does not build there:
 
 ```bash
 python3.13 -m venv .venv
 ```
+
+(Any interpreter works as long as it ends up at `.venv/bin/python`, which the demo scripts use by
+default — a conda environment symlinked to `.venv` is fine.)
 ```bash
 .venv/bin/pip install --only-binary=cryptography "cryptography<45" mcp
 ```
