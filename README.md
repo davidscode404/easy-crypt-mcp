@@ -288,8 +288,9 @@ Or use the REST mirror from any language, with an interactive page at <http://lo
 docker run --rm --platform linux/amd64 -p 8000:8000 -v "$PWD:$PWD" -w "$PWD" easycrypt-mcp python3 -m uvicorn --app-dir /app http_api:app --host 0.0.0.0 --port 8000
 ```
 
-**As a Python library.** With EasyCrypt on `PATH` (or `EASYCRYPT_BIN` pointing at `scripts/ec-docker`),
-no server is needed:
+**From Python, by importing this repo's core module.** `easycrypt_core.py` is the layer everything
+else here sits on (EasyCrypt itself is OCaml and has no Python API). With EasyCrypt on `PATH` (or
+`EASYCRYPT_BIN` pointing at `scripts/ec-docker`), no server is needed:
 
 ```python
 import easycrypt_core as ec
