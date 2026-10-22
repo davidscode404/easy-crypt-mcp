@@ -1,5 +1,7 @@
 # easy-crypt-mcp
 
+![](images/screenshot.png)
+
 [EasyCrypt](https://github.com/EasyCrypt/easycrypt) checks cryptographic proofs by machine. It
 normally runs through an Emacs front-end, which leaves an AI agent no way to load a proof, read
 the open goals or test a tactic. This repo adds that missing interface:
